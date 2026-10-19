@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.7（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归） |
+| 版本 | 0.4.8（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归 + P11 Word 文档生成） |
 | 日期 | 2026-10-20 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具）；P11 新增 labmate_docx Word(.docx) 零依赖生成（OOXML 手工构造 + zipfile 打包，标题大纲/中文论文排版/三线表，19→20 工具，0.4.8） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -237,20 +237,33 @@
 
 ---
 
+### P11（0.4.8 · 写作出口的另一半：Word 文档生成，19 → 20 工具）
+
+**复核结论**：写作链路此前只有 LaTeX 一个出口（tex 三线表/图/公式 + bibtex 库管理），但试验报告、学位论文、基金申请书在中文科研圈的大头是 Word 生态——导师改稿、合作方往来、行政存档全是 .docx，把三线表数据从 labmate_tex 手抄进 Word 正是调研 2.2 指出的转录错误同款重灾区。docx 没有合适的现有宿主（tex 是 LaTeX 片段语义、table 是只读体检承诺），故按 plot/pdf 独立工具先例走第 20 件 `labmate_docx`；CSV 直读链路从 tool_tex 内联块抽取为 `_read_csv_rows` 共用函数（行为等价重构，533 项历史测试守护），zipfile 写入与 xlsx 读取同模块（P4 先例）。
+
+| # | 工具/增强 | 覆盖刚需 | 零依赖实现要点 |
+|---|---|---|---|
+| 20 | `labmate_docx`（新工具） | 写作 15-20% 时间占比的 Word 出口（试验报告/论文初稿/送审稿） | 手工构造最小 OOXML（[Content_Types].xml + 双层 rels + document.xml + styles.xml）+ zipfile 打包；三线表 booktabs 规范三线（顶/底线 1.5pt sz=12、表头线 0.5pt sz=4、四边框显式 none 无竖线、tblHeader 跨页重复表头）；Heading1-3 挂 outlineLvl（导航窗格可跳转、可插目录）；正文 docDefaults 宋体+Times New Roman 小四、1.5 倍行距、首行缩进 2 字符；A4 版面 sectPr；数值列自动右对齐（复用 `_parse_cell_float`）；sections 三类区块（heading level 1-3 / paragraph / table），表格数据三源（csv_path 直读 / headers+rows / rows 首行作表头）兼容 tex 心智；XML 五实体转义；>1000 行截断明示；写盘失败诚实报错 |
+| skill 补充 | labmate-writing 加 Word 出口步骤 + 主路由加行 | 引导闭环 | 标准工作流补"Word 版报告"一步（给不写 LaTeX 的导师/合作者），触发词补「生成 Word 报告」「导出 docx」 |
+
+**验收**：十二套单测 603 项全绿（v12 新增 70 项：黄金用例生成完整报告后 **zipfile 回读逐部件断言**——五部件齐全、document.xml/styles.xml ElementTree 良构、Content_Types 双 Override、根 rels→document、document rels→styles 挂载正确；版式断言——主标题黑体 18pt 居中、heading 挂 Heading1/2、正文缩进 firstLineChars=200、A4 11906×16838、表题在表格上方五号加粗、docDefaults 宋体+Times New Roman 小四、line=360 行距、outlineLvl 0/1/2、keepNext；三线表断言——sz=12 恰好 2 条、四边框全 none、表头底线 sz=4、tblHeader、表头加粗居中/文本列居中/数值列右对齐、列宽 2768×3 等分版心、表后空段防相邻表粘连；内联 rows 首行表头/headers+rows/数字直出三形态；XML 五实体转义且 & 不双重转义；1050 行截断（w:tr=1001 含表头）；边界十六项（缺 save_path/自动补 .docx 后缀/sections 非 list/空数组/非 dict/未知 type/缺 type/heading 缺 text/level 0/4/非整数/paragraph 缺 text/table 三源皆空/CSV 不存在带序号/写盘失败诚实报错）；协议层 TOOLS=20、`_read_csv_rows` 黄金返回、labmate_tex CSV 老路径不受重构影响、stdio 冒烟 initialize 0.4.8 + 产物回读）。一次通过无返工。
+
+---
+
 ## 7. 架构升级方案
 
 ```
 labmate/
-├── bin/labmate_server.py     # MCP 计算引擎：5 → 9（0.2）→ 11（0.3）→ 17（0.4）→ 19 工具（0.4.2 起）
+├── bin/labmate_server.py     # MCP 计算引擎：5 → 9（0.2）→ 11（0.3）→ 17（0.4）→ 19（0.4.2）→ 20 工具（0.4.8 起）
 │   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite（0.4.7 增 multi 多元线性回归）/ deps
 │   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分；0.4.5 增 spectrum FFT 频谱）
 │   ├─ 绘图组：plot / curve（0.4.2 SVG 出图 + 曲线特征；0.4.3 bar 柱状 + batch 批量）
 │   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度；0.4.6 增 sn S-N 疲劳拟合）/ errors / doe（0.4 新增）
-│   ├─ 写作组：tex / bibtex（0.4 新增）
+│   ├─ 写作组：tex / docx（0.4.8 新增 Word 文档生成）/ bibtex（0.4 新增）
 │   ├─ 文献组：arxiv / cite / search（0.3 多源聚合）
 │   └─ 本地组：pdf（0.3 零依赖 PDF 接地）
 ├── skills/
-│   ├── labmate/               # 主路由：工具优先级表（19 工具）
+│   ├── labmate/               # 主路由：工具优先级表（20 工具）
 │   ├── labmate-stats/         # 统计设计（方法选型+误用防护，0.4 新增）
 │   ├── labmate-writing/       # 论文写作工作流（0.4 新增）
 │   ├── labmate-literature/    # 文献工作流（聚合+PDF 接地+Zotero/pandoc 指导）

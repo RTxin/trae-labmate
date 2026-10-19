@@ -8,7 +8,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.7 · 十九件套）：
+工具（0.4.8 · 二十件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
@@ -32,6 +32,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   labmate_curve    试验曲线特征提取：弹性模量 E（含 R²）/ 0.2% 偏移屈服 / 峰值强度 / 总能量
   写作组（零依赖）：
   labmate_tex      LaTeX 三线表(booktabs)/图环境/公式环境生成
+  labmate_docx     Word(.docx) 文档生成（零依赖 OOXML：标题大纲/正文/三线表，手工 XML + zipfile）
   labmate_bibtex   BibTeX 库体检（必填字段/重复 key/DOI/标题）与多文件去重合并
   文献组（标准库 urllib，需联网）：
   labmate_arxiv    arXiv 检索（官方免费 API，无需 key）
@@ -64,7 +65,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.7"
+SERVER_VERSION = "0.4.8"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -2359,6 +2360,26 @@ def tool_doe(args):
     return "❌ 未知 action：%s（支持 ortho / fullfact / lhs）" % action
 
 # ======================================================================
+# 9.5 CSV 直读共用链路（tex 三线表 / docx 表格共用一份解析）
+# ======================================================================
+def _read_csv_rows(csv_path):
+    """本机 CSV → (headers, rows)：utf-8-sig 容错 + 分隔符探测 + 过滤全空行，首行按表头。
+    出错返回错误字符串（调用方判 isinstance(str)）。"""
+    if not os.path.exists(csv_path):
+        return "❌ 文件不存在：%s" % csv_path
+    try:
+        with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            text = f.read()
+        parsed = list(csv.reader(text.splitlines(),
+                                 delimiter=_sniff_delimiter(text[:2048])))
+        parsed = [r for r in parsed if any(c.strip() for c in r)]
+        if not parsed:
+            return "❌ CSV 为空：%s" % csv_path
+        return parsed[0], parsed[1:]
+    except Exception as exc:
+        return "❌ CSV 读取失败：%s" % exc
+
+# ======================================================================
 # 10. LaTeX 写作生成（booktabs 三线表 / 图环境 / 公式环境）
 # ======================================================================
 def tool_tex(args):
@@ -2367,19 +2388,10 @@ def tool_tex(args):
         headers, rows = args.get("headers") or [], args.get("rows")
         csv_path = args.get("csv_path")
         if csv_path:
-            if not os.path.exists(csv_path):
-                return "❌ 文件不存在：%s" % csv_path
-            try:
-                with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                    text = f.read()
-                parsed = list(csv.reader(text.splitlines(),
-                                         delimiter=_sniff_delimiter(text[:2048])))
-                parsed = [r for r in parsed if any(c.strip() for c in r)]
-                if not parsed:
-                    return "❌ CSV 为空：%s" % csv_path
-                headers, rows = parsed[0], parsed[1:]
-            except Exception as exc:
-                return "❌ CSV 读取失败：%s" % exc
+            parsed = _read_csv_rows(csv_path)
+            if isinstance(parsed, str):
+                return parsed
+            headers, rows = parsed
         if not headers or not rows:
             return "❌ table 需要 headers + rows（或给 csv_path 直读数据）"
         align = args.get("align")
@@ -3347,6 +3359,220 @@ def tool_curve(args):
     return "\n".join(lines)
 
 # ======================================================================
+# 10.5 Word 文档生成（零依赖 OOXML：手工构造 XML + zipfile 打包）
+# ======================================================================
+_DOCX_XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+_DOCX_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+# A4 纵向（11906×16838 twips）+ 上 2.54cm 左右 3.17cm 边距（Word 中文默认）
+_DOCX_SECTPR = ('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+                '<w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" '
+                'w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>')
+_DOCX_CONTENT_TYPES = (
+    _DOCX_XML_HEAD +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/word/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    '<Override PartName="/word/styles.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+    '</Types>')
+_DOCX_ROOT_RELS = (
+    _DOCX_XML_HEAD +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="word/document.xml"/></Relationships>')
+_DOCX_DOC_RELS = (
+    _DOCX_XML_HEAD +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+    'Target="styles.xml"/></Relationships>')
+
+def _xml_escape(s):
+    """XML 文本转义：& < > ' \" 五实体（& 最先替换，防双重转义）。"""
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;").replace("'", "&apos;"))
+
+def _docx_styles_xml():
+    """styles.xml：docDefaults（宋体+Times New Roman 小四、1.5 倍行距）+ Heading1-3。
+    outlineLvl 让 Word 导航窗格把标题识别为大纲节点（可跳转/自动目录）。"""
+    heads = []
+    for lvl, sz in ((1, 32), (2, 28), (3, 24)):  # 三号/四号/小四（sz 单位半磅）
+        heads.append(
+            '<w:style w:type="paragraph" w:styleId="Heading%d"><w:name w:val="heading %d"/>'
+            '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/>'
+            '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240" w:after="120"/>'
+            '<w:outlineLvl w:val="%d"/></w:pPr>'
+            '<w:rPr><w:b/><w:bCs/><w:sz w:val="%d"/><w:szCs w:val="%d"/></w:rPr></w:style>'
+            % (lvl, lvl, lvl - 1, sz, sz))
+    return (_DOCX_XML_HEAD +
+            '<w:styles ' + _DOCX_NS + '><w:docDefaults><w:rPrDefault><w:rPr>'
+            '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" '
+            'w:eastAsia="宋体" w:cs="Times New Roman"/>'
+            '<w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault>'
+            '<w:pPrDefault><w:pPr><w:spacing w:line="360" w:lineRule="auto"/></w:pPr>'
+            '</w:pPrDefault></w:docDefaults>'
+            '<w:style w:type="paragraph" w:styleId="Normal" w:default="1">'
+            '<w:name w:val="Normal"/><w:qFormat/></w:style>'
+            + "".join(heads) + '</w:styles>')
+
+def _docx_cell_para(text, jc, bold=False):
+    """表格单元格段落：给定对齐（center/right），不受正文首行缩进影响。"""
+    rpr = '<w:b/>' if bold else ''
+    return ('<w:p><w:pPr><w:jc w:val="%s"/></w:pPr><w:r><w:rPr>%s</w:rPr>'
+            '<w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (jc, rpr, _xml_escape(text)))
+
+def _docx_col_aligns(headers, rows):
+    """列对齐：数值列右对齐、其余居中（复用 _parse_cell_float 判定，与 tex 数值列探测同源）。"""
+    aligns = []
+    for ci in range(len(headers)):
+        cells = [r[ci] if ci < len(r) else "" for r in rows]
+        numeric = bool(rows) and all(
+            str(c).strip() and _parse_cell_float(c) is not None for c in cells)
+        aligns.append("right" if numeric else "center")
+    return aligns
+
+def _docx_table_xml(headers, rows, aligns):
+    """三线表（booktabs 规范的 Word 版）：顶/底线 1.5pt（sz=12），表头行底线 0.5pt（sz=4），
+    行间无横线、无竖线；表头挂 tblHeader 跨页自动重复；列宽等分版心。"""
+    colw = (11906 - 1800 - 1800) // len(headers)  # 版心 8306 twips 等分
+    head_cells = "".join(
+        '<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/>'
+        '<w:tcBorders><w:bottom w:val="single" w:sz="4" w:space="0" w:color="000000"/></w:tcBorders>'
+        '<w:vAlign w:val="center"/></w:tcPr>%s</w:tc>'
+        % (colw, _docx_cell_para(h, "center", bold=True)) for h in headers)
+    head_row = '<w:tr><w:trPr><w:tblHeader/></w:trPr>%s</w:tr>' % head_cells
+    body_rows = []
+    for r in rows:
+        cells = "".join(
+            '<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>%s</w:tc>'
+            % (colw, _docx_cell_para(r[i] if i < len(r) else "", aligns[i]))
+            for i in range(len(headers)))
+        body_rows.append('<w:tr>%s</w:tr>' % cells)
+    return ('<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/>'
+            '<w:tblBorders>'
+            '<w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/>'
+            '<w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+            '<w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/>'
+            '<w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+            '<w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+            '<w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+            '</w:tblBorders><w:tblLayout w:type="fixed"/>'
+            '<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="108" w:type="dxa"/>'
+            '<w:bottom w:w="30" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar>'
+            '</w:tblPr><w:tblGrid>%s</w:tblGrid>%s%s</w:tbl>'
+            % ("".join('<w:gridCol w:w="%d"/>' % colw for _ in headers),
+               head_row, "".join(body_rows)))
+
+def tool_docx(args):
+    """Word(.docx) 生成：sections 描述 → 手工构造 OOXML → zipfile 打包落盘（零依赖）。"""
+    save_path = str(args.get("save_path") or "").strip()
+    if not save_path:
+        return "❌ 需要 save_path（.docx 输出路径，如 报告.docx）"
+    if not save_path.lower().endswith(".docx"):
+        save_path += ".docx"
+    sections = args.get("sections")
+    if not isinstance(sections, list) or not sections:
+        return ("❌ sections 需为非空数组：[{type: heading, text, level} | "
+                "{type: paragraph, text} | {type: table, csv_path 或 headers+rows 或 rows（首行表头）, caption?}]")
+    body, stats = [], {"heading": 0, "paragraph": 0, "table": 0}
+    table_infos = []
+    for si, sec in enumerate(sections, 1):
+        if not isinstance(sec, dict):
+            return "❌ 第 %d 个 section 需为对象（{type: heading|paragraph|table, ...}）" % si
+        stype = str(sec.get("type") or "").lower()
+        if stype == "heading":
+            text = str(sec.get("text") or "")
+            if not text.strip():
+                return "❌ 第 %d 个 heading 需要 text（标题文字）" % si
+            try:
+                level = int(sec.get("level", 1))
+            except (TypeError, ValueError):
+                return "❌ 第 %d 个 heading 的 level 需为 1-3 整数" % si
+            if not 1 <= level <= 3:
+                return "❌ 第 %d 个 heading 的 level 需为 1-3 整数（当前 %s）" % (si, level)
+            body.append('<w:p><w:pPr><w:pStyle w:val="Heading%d"/></w:pPr>'
+                        '<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>'
+                        % (level, _xml_escape(text)))
+            stats["heading"] += 1
+        elif stype == "paragraph":
+            text = str(sec.get("text") or "")
+            if not text.strip():
+                return "❌ 第 %d 个 paragraph 需要 text（正文文字）" % si
+            body.append('<w:p><w:pPr><w:ind w:firstLineChars="200" w:firstLine="480"/></w:pPr>'
+                        '<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>'
+                        % _xml_escape(text))
+            stats["paragraph"] += 1
+        elif stype == "table":
+            headers, rows = sec.get("headers"), sec.get("rows")
+            csv_path = sec.get("csv_path")
+            if csv_path:
+                parsed = _read_csv_rows(str(csv_path))
+                if isinstance(parsed, str):
+                    return "❌ 第 %d 个 table：%s" % (si, parsed)
+                headers, rows = parsed
+            elif headers is not None:
+                headers, rows = list(headers) if headers else [], list(rows) if rows else []
+            elif rows:
+                rows = list(rows)
+                headers, rows = rows[0], rows[1:]
+            if not headers or not rows:
+                return ("❌ 第 %d 个 table 缺数据：给 csv_path（直读本机 CSV），"
+                        "或 headers + rows，或 rows（首行作表头）" % si)
+            trunc = len(rows) > 1000
+            if trunc:
+                rows = rows[:1000]
+            headers = [str(h) for h in headers]
+            caption = str(sec.get("caption") or "").strip()
+            if caption:
+                body.append('<w:p><w:pPr><w:jc w:val="center"/>'
+                            '<w:spacing w:before="120" w:after="60"/></w:pPr>'
+                            '<w:r><w:rPr><w:b/><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr>'
+                            '<w:t xml:space="preserve">%s</w:t></w:r></w:p>' % _xml_escape(caption))
+            body.append(_docx_table_xml(headers, rows, _docx_col_aligns(headers, rows)))
+            body.append('<w:p/>')  # 表后空段：防相邻表格粘连 + 表后留白
+            stats["table"] += 1
+            table_infos.append("%d 行 × %d 列%s" % (len(rows), len(headers),
+                                                   "，超 1000 行已截断" if trunc else ""))
+        else:
+            return "❌ 第 %d 个 section 未知 type：%s（支持 heading / paragraph / table）" % (
+                si, stype or "（缺 type）")
+    parts = []
+    title = str(args.get("title") or "").strip()
+    if title:
+        parts.append('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="360"/></w:pPr>'
+                     '<w:r><w:rPr><w:rFonts w:ascii="黑体" w:hAnsi="黑体" '
+                     'w:eastAsia="黑体" w:cs="黑体"/><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/>'
+                     '</w:rPr><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % _xml_escape(title))
+    parts += body
+    doc_xml = (_DOCX_XML_HEAD + '<w:document ' + _DOCX_NS + '><w:body>'
+               + "".join(parts) + _DOCX_SECTPR + '</w:body></w:document>')
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        with zipfile.ZipFile(save_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("[Content_Types].xml", _DOCX_CONTENT_TYPES)
+            zf.writestr("_rels/.rels", _DOCX_ROOT_RELS)
+            zf.writestr("word/document.xml", doc_xml)
+            zf.writestr("word/_rels/document.xml.rels", _DOCX_DOC_RELS)
+            zf.writestr("word/styles.xml", _docx_styles_xml())
+    except Exception as exc:
+        return "❌ docx 写入失败：%s" % exc
+    lines = ["**Word 文档已生成**", "",
+             "- 路径：%s" % save_path,
+             "- 结构：%s%d 个区块（标题 ×%d、正文 ×%d、表格 ×%d）"
+             % (("主标题「%s」+ " % title) if title else "", len(sections),
+                stats["heading"], stats["paragraph"], stats["table"])]
+    for ti, info in enumerate(table_infos, 1):
+        lines.append("- 表 %d：%s（数值列右对齐、文本列居中）" % (ti, info))
+    lines.append("")
+    lines.append("（三线表规范：顶线/底线 1.5pt、表头线 0.5pt、行间无横线无竖线；"
+                 "标题已挂大纲级别，Word 导航窗格可跳转、可插目录；"
+                 "正文宋体+Times New Roman 小四、1.5 倍行距、首行缩进 2 字符）")
+    return "\n".join(lines)
+
+# ======================================================================
 # MCP 协议层（newline-delimited JSON-RPC 2.0）
 # ======================================================================
 TOOLS = [
@@ -3534,6 +3760,13 @@ TOOLS = [
          "initial_frac": {"type": "number", "description": "弹性段窗口（曲线前段 x 范围占比），默认 0.2"},
          "yield_offset": {"type": "number", "description": "屈服偏移量，默认 0.002（0.2%）"}},
      "required": ["x", "y"]}},
+    {"name": "labmate_docx",
+     "description": "Word(.docx) 文档零依赖生成（OOXML 手工构造 + zipfile 打包）：主标题 + heading 标题（挂大纲级别，Word 导航窗格可跳转）+ paragraph 正文（宋体+Times New Roman 小四、1.5 倍行距、首行缩进 2 字符）+ table 三线表（顶/底线 1.5pt、表头线 0.5pt、无竖线，数值列自动右对齐，CSV 直读或内联 rows）。产出本机 .docx，Word/WPS 直接打开续写。",
+     "inputSchema": {"type": "object", "properties": {
+         "save_path": {"type": "string", "description": ".docx 输出路径（如 报告.docx）"},
+         "title": {"type": "string", "description": "文档主标题（黑体 18pt 居中，可选）"},
+         "sections": {"type": "array", "description": "内容块数组：{type: heading, text, level(1-3)} | {type: paragraph, text} | {type: table, csv_path 或 headers+rows 或 rows（首行作表头）, caption?}"}},
+     "required": ["save_path", "sections"]}},
 ]
 
 _DISPATCH = {
@@ -3556,6 +3789,7 @@ _DISPATCH = {
     "labmate_signal": tool_signal,
     "labmate_plot": tool_plot,
     "labmate_curve": tool_curve,
+    "labmate_docx": tool_docx,
 }
 
 def handle(msg):

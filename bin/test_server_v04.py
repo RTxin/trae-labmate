@@ -289,7 +289,7 @@ bib = srv._make_bibtex(base_meta, used_keys={"Zhang2024", "Zhang2024a"})
 ok("bug6 连撞顺延后缀 b", bib.startswith("@article{Zhang2024b,"), bib[:40])
 
 # ====================== stdio 冒烟 ======================
-print("== 20. stdio 冒烟（0.4.7 · 19 工具）==")
+print("== 20. stdio 冒烟（0.4.8 · 20 工具）==")
 def rpc(msgs):
     p = subprocess.run([sys.executable, os.path.join(HERE, "labmate_server.py")],
                        input="\n".join(msgs) + "\n", capture_output=True,
@@ -301,9 +301,9 @@ out = rpc([
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_stats","arguments":{"action":"ttest","a":[9,10,11,12,13],"mu":10}}}',
 ])
-ok("版本 0.4.7", out[0]["result"]["serverInfo"]["version"] == "0.4.7")
+ok("版本 0.4.8", out[0]["result"]["serverInfo"]["version"] == "0.4.8")
 names = [t["name"] for t in out[1]["result"]["tools"]]
-ok("tools/list = 19", len(names) == 19, names)
+ok("tools/list = 20", len(names) == 20, names)
 ok("六个新工具全部注册", set(["labmate_stats", "labmate_errors", "labmate_doe",
                               "labmate_tex", "labmate_bibtex", "labmate_signal"]) <= set(names), names)
 ok("tools/call stats 中文+数学正常", "t = 1.41421" in out[2]["result"]["content"][0]["text"],

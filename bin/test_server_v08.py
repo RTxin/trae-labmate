@@ -152,9 +152,9 @@ r = srv.tool_stats({"action": "fitxyz", "data": WS})
 ok("未知 action 提示包含 outlier / weibull",
    "❌" in r and "outlier" in r and "weibull" in r, r)
 
-# ====================== 协议层：19 工具 + stdio 冒烟 ======================
-print("== 35. 协议层 19 工具与 stdio 冒烟 ==")
-ok("TOOLS 共 19 个（0.4.7 不新增工具）", len(srv.TOOLS) == 19, len(srv.TOOLS))
+# ====================== 协议层：20 工具 + stdio 冒烟 ======================
+print("== 35. 协议层 20 工具与 stdio 冒烟 ==")
+ok("TOOLS 共 20 个（0.4.7 未新增，0.4.8 增 docx）", len(srv.TOOLS) == 20, len(srv.TOOLS))
 ok("_DISPATCH 覆盖全部 TOOLS 名称",
    all(t["name"] in srv._DISPATCH for t in srv.TOOLS)
    and len(srv._DISPATCH) == len(srv.TOOLS))
@@ -182,7 +182,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_stats",
                        "arguments": {"action": "weibull", "data": WS}}}])
-ok("initialize 版本 = 0.4.7", res[0]["result"]["serverInfo"]["version"] == "0.4.7", res[0])
+ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
 ok("stdio outlier 剔除判定不丢",
    "统计离群值，剔除" in res[1]["result"]["content"][0]["text"], res[1]["result"]["content"][0]["text"][:150])
 ok("stdio weibull 已知值不丢（m = 8）",

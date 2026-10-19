@@ -119,7 +119,7 @@ ok("gauss_solve 多右端列同解（A = [[2,1],[1,3]]，一次解出 A⁻¹ 两
 
 # ======================================================================
 print("== 49. 协议层与文档注册 ==")
-ok("TOOLS 仍为 19 件", len(srv.TOOLS) == 19, len(srv.TOOLS))
+ok("TOOLS 为 20 件（0.4.8 增 docx）", len(srv.TOOLS) == 20, len(srv.TOOLS))
 sig = [t for t in srv.TOOLS if t["name"] == "labmate_fit_lite"][0]
 ok("schema：model 枚举含 multi", "multi" in sig["inputSchema"]["properties"]["model"]["description"], "")
 ok("schema：描述含多元线性回归", "多元线性回归" in sig["description"], sig["description"][:200])
@@ -127,7 +127,7 @@ ok("schema：描述含调整 R² 与整体 F", "调整 R²" in sig["description"
 ok("schema：x 描述说明两种形态", "自动转置" in sig["inputSchema"]["properties"]["x"]["description"], "")
 ok("_DISPATCH 含 labmate_fit_lite", callable(srv._DISPATCH.get("labmate_fit_lite")), "")
 main_skill = open(os.path.join(HERE, "..", "skills", "labmate", "SKILL.md"), encoding="utf-8").read()
-ok("主路由版本行 = 0.4.7", "v0.4.7" in main_skill, "")
+ok("主路由版本行 = 0.4.8", "v0.4.8" in main_skill, "")
 ok("主路由工具表含多元回归行", "多元" in main_skill and "multi" in main_skill, "")
 fit_skill = os.path.join(HERE, "..", "skills", "labmate-fit", "SKILL.md")
 fit_txt = open(fit_skill, encoding="utf-8").read() if os.path.exists(fit_skill) else ""
@@ -144,7 +144,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "labmate_fit_lite",
                        "arguments": {"model": "multi", "x": [G_X1, G_X2], "y": G_Y}}}])
-ok("initialize 版本 = 0.4.7", res[0]["result"]["serverInfo"]["version"] == "0.4.7", res[0])
+ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
 ok("stdio multi 黄金用例（方程精确还原）",
    "回归方程：y = 2 + 3·x1 - 0.5·x2" in res[1]["result"]["content"][0]["text"],
    res[1]["result"]["content"][0]["text"][:150])

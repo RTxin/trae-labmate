@@ -1,6 +1,6 @@
 ---
 name: labmate-writing
-description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文表格（三线表）、figure/subfigure 图环境、编号公式、BibTeX 参考文献库管理（查重/体检/合并/排序）、把试验结果整理成投稿可用格式时使用。触发词：「做三线表」「生成表格」「这个表怎么排」「合并 bib 文件」「参考文献重复了」「图环境」「子图怎么排」「公式怎么编号」。计算一律调 MCP 工具 labmate_tex / labmate_bibtex，不手拼 LaTeX 字符串。
+description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文表格（三线表）、figure/subfigure 图环境、编号公式、BibTeX 参考文献库管理（查重/体检/合并/排序）、生成 Word 文档（.docx 报告/论文初稿）、把试验结果整理成投稿可用格式时使用。触发词：「做三线表」「生成表格」「这个表怎么排」「合并 bib 文件」「参考文献重复了」「图环境」「子图怎么排」「公式怎么编号」「生成 Word 报告」「导出 docx」。计算一律调 MCP 工具 labmate_tex / labmate_bibtex，Word 出口调 labmate_docx，不手拼 LaTeX 字符串。
 ---
 
 # LabMate · 论文写作与 LaTeX 生成（labmate-writing）
@@ -12,6 +12,7 @@ description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文
 | booktabs 三线表（支持 csv_path 直读、数值列自动右对齐） | `labmate_tex`（action: table） |
 | figure 图环境（多图自动 subfigure） | `labmate_tex`（action: figure） |
 | 带编号公式（\label + \eqref 引用） | `labmate_tex`（action: equation） |
+| **Word 文档初稿**（标题大纲 + 正文 + 三线表，.docx） | `labmate_docx` |
 | .bib 库体检（缺字段/重复 key/DOI） | `labmate_bibtex`（action: check） |
 | 跨库去重合并（DOI 优先、字段互补） | `labmate_bibtex`（action: merge） |
 | 按年份/作者/ key 重排 | `labmate_bibtex`（action: merge + sort 参数） |
@@ -22,7 +23,8 @@ description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文
 2. **三线表**：`labmate_tex(table, csv_path=..., caption="...", label="tab:xxx")`——数值列自动右对齐，文本列左对齐；超 40 行工具会提示分表或 longtable
 3. **图环境**：`labmate_tex(figure, files=[...], caption="...", label="fig:xxx")`——多图自动 subfigure + subcaption 包提示；图本体用 matplotlib + `labmate_style` 生成
 4. **参考文献**：新引用用 `labmate_cite(doi=...)` 生成真实 BibTeX；定期 `labmate_bibtex(check, bib_path=...)` 体检，从合作者/导师那里拿到杂库先 merge 去重再并入
-5. **终稿前**：走 `labmate-disclosure` 做四类校验（数据真实引用/量纲/边界声明/AI 使用披露）
+5. **Word 版报告**：给不写 LaTeX 的导师/合作者——`labmate_docx(save_path="报告.docx", title="...", sections=[{type: heading, text, level}, {type: paragraph, text}, {type: table, csv_path=..., caption}])`；标题挂大纲级别（导航窗格可跳转、可插目录），正文宋体+Times New Roman 小四 1.5 倍行距，表格同三线表规范（数据与 labmate_tex 同源，CSV 直读）
+6. **终稿前**：走 `labmate-disclosure` 做四类校验（数据真实引用/量纲/边界声明/AI 使用披露）
 
 ## 本领域的专业常识（模块的灵魂）
 

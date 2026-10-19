@@ -158,9 +158,9 @@ ok("未知 action 拦截", "❌" in r and "features" in r, r)
 r = srv.tool_curve({"x": CX[::-1], "y": CY[::-1]})
 ok("乱序输入自动按 x 排序（E=200 不变）", "弹性模量 E = 200" in r, r)
 
-# ====================== 协议层：19 工具 + stdio 冒烟 ======================
-print("== 28. 协议层 19 工具与 stdio 冒烟 ==")
-ok("TOOLS 共 19 个", len(srv.TOOLS) == 19, len(srv.TOOLS))
+# ====================== 协议层：20 工具 + stdio 冒烟 ======================
+print("== 28. 协议层 20 工具与 stdio 冒烟 ==")
+ok("TOOLS 共 20 个", len(srv.TOOLS) == 20, len(srv.TOOLS))
 ok("labmate_plot/labmate_curve 均注册",
    any(t["name"] == "labmate_plot" for t in srv.TOOLS)
    and any(t["name"] == "labmate_curve" for t in srv.TOOLS))
@@ -180,8 +180,8 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_curve",
                        "arguments": {"x": CX, "y": CY}}}])
-ok("initialize 版本 = 0.4.7", res[0]["result"]["serverInfo"]["version"] == "0.4.7", res[0])
-ok("stdio tools/list = 19", len(res[1]["result"]["tools"]) == 19, len(res[1]["result"]["tools"]))
+ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
+ok("stdio tools/list = 20", len(res[1]["result"]["tools"]) == 20, len(res[1]["result"]["tools"]))
 curve_text = res[2]["result"]["content"][0]["text"]
 ok("stdio tools/call labmate_curve 已知值不丢",
    "弹性模量 E = 200" in curve_text and "总能量" in curve_text, curve_text[:150])

@@ -167,9 +167,9 @@ ok("乱序曲线自动按 x 排序（E=200 不变）",
 ok("默认 action=features 单条不回归（curves 不干扰）",
    "试验曲线特征" in srv.tool_curve({"x": CX, "y": CY, "curves": CURVES}), "")
 
-# ====================== 协议层：19 工具 + stdio 冒烟 ======================
-print("== 31. 协议层 19 工具与 stdio 冒烟 ==")
-ok("TOOLS 共 19 个（bar/batch 不新增工具）", len(srv.TOOLS) == 19, len(srv.TOOLS))
+# ====================== 协议层：20 工具 + stdio 冒烟 ======================
+print("== 31. 协议层 20 工具与 stdio 冒烟 ==")
+ok("TOOLS 共 20 个（bar/batch 未新增，0.4.8 增 docx）", len(srv.TOOLS) == 20, len(srv.TOOLS))
 ok("labmate_plot/labmate_curve 均注册",
    any(t["name"] == "labmate_plot" for t in srv.TOOLS)
    and any(t["name"] == "labmate_curve" for t in srv.TOOLS))
@@ -195,8 +195,8 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_curve",
                        "arguments": {"action": "batch", "curves": CURVES}}}])
-ok("initialize 版本 = 0.4.7", res[0]["result"]["serverInfo"]["version"] == "0.4.7", res[0])
-ok("stdio tools/list = 19", len(res[1]["result"]["tools"]) == 19, len(res[1]["result"]["tools"]))
+ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
+ok("stdio tools/list = 20", len(res[1]["result"]["tools"]) == 20, len(res[1]["result"]["tools"]))
 batch_text = res[2]["result"]["content"][0]["text"]
 ok("stdio tools/call batch 已知值不丢（E=200 ± 10）",
    "平行试样批量特征" in batch_text and "**弹性模量 E = 200 ± 10**" in batch_text,

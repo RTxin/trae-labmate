@@ -87,7 +87,7 @@ ok("weibull 旧路径不受影响（stress 单值语义）",
 
 # ======================================================================
 print("== 44. 协议层与文档注册 ==")
-ok("TOOLS 仍为 19 件", len(srv.TOOLS) == 19, len(srv.TOOLS))
+ok("TOOLS 为 20 件（0.4.8 增 docx）", len(srv.TOOLS) == 20, len(srv.TOOLS))
 sig = [t for t in srv.TOOLS if t["name"] == "labmate_stats"][0]
 ok("schema：action 枚举含 sn", "sn" in sig["inputSchema"]["properties"]["action"]["description"], "")
 ok("schema：描述含 S-N 疲劳拟合", "S-N 疲劳拟合" in sig["description"], sig["description"][:200])
@@ -101,7 +101,7 @@ ok("schema：stress 描述兼顾 weibull/sn 两用",
    "sn：疲劳应力数组" in sig["inputSchema"]["properties"]["stress"]["description"], "")
 ok("_DISPATCH 含 labmate_stats", callable(srv._DISPATCH.get("labmate_stats")), "")
 main_skill = open(os.path.join(HERE, "..", "skills", "labmate", "SKILL.md"), encoding="utf-8").read()
-ok("主路由版本行 = 0.4.7", "v0.4.7" in main_skill, "")
+ok("主路由版本行 = 0.4.8", "v0.4.8" in main_skill, "")
 ok("主路由工具表含 S-N 行", "S-N" in main_skill and "action=sn" in main_skill, "")
 frac = os.path.join(HERE, "..", "skills", "labmate-fracture", "SKILL.md")
 frac_txt = open(frac, encoding="utf-8").read() if os.path.exists(frac) else ""
@@ -118,7 +118,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "labmate_stats",
                        "arguments": {"action": "sn", "stress": G_SIG, "cycles": G_CYC}}}])
-ok("initialize 版本 = 0.4.7", res[0]["result"]["serverInfo"]["version"] == "0.4.7", res[0])
+ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
 ok("stdio sn 黄金用例（a = 3）", "疲劳强度指数 a = 3" in res[1]["result"]["content"][0]["text"],
    res[1]["result"]["content"][0]["text"][:150])
 
