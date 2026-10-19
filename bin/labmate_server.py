@@ -17,6 +17,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   labmate_errors    不确定度传播（GUM 一阶数值偏导）+ 线性回归参数区间
   统计组（零依赖，t/F/卡方分布精确尾概率）：
   labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA / JB 正态性 / 置信区间 / 样本量
+                   异常值剔除(GB/T 4883 格拉布斯/狄克松，歧离值与统计离群值两级判定) / Weibull 强度分析
   设计组（零依赖）：
   labmate_doe       正交表(L4~L32/L9/L27/L25，素数域生成) / 全因子 / 拉丁超立方
   labmate_signal    移动平均与 Savitzky-Golay 平滑 / 线性插值 / 梯形与 Simpson 积分 / 重采样
@@ -61,7 +62,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.3"
+SERVER_VERSION = "0.4.4"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -1634,8 +1635,75 @@ def _quantile(sx, q):
     hi = min(lo + 1, n - 1)
     return sx[lo] * (1 - frac) + sx[hi] * frac
 
+# 狄克松检验临界值 D(α, n)，摘自 GB/T 4883-2008 表（单侧）。
+# r 公式随 n 分四段：n≤7 用 r10，8~10 用 r11，11~13 用 r21，14~30 用 r22，
+# 故临界值序列在段界处（8、11、14）不单调，属表本身的性质而非笔误。
+_DIXON_TABLE = {
+    0.05: {3: 0.941, 4: 0.765, 5: 0.642, 6: 0.560, 7: 0.507,
+           8: 0.554, 9: 0.512, 10: 0.477,
+           11: 0.576, 12: 0.546, 13: 0.521,
+           14: 0.546, 15: 0.525, 16: 0.507, 17: 0.490, 18: 0.475, 19: 0.462,
+           20: 0.450, 21: 0.440, 22: 0.430, 23: 0.421, 24: 0.413, 25: 0.406,
+           26: 0.399, 27: 0.393, 28: 0.387, 29: 0.381, 30: 0.376},
+    0.01: {3: 0.988, 4: 0.889, 5: 0.780, 6: 0.698, 7: 0.637,
+           8: 0.683, 9: 0.635, 10: 0.597,
+           11: 0.705, 12: 0.679, 13: 0.648,
+           14: 0.674, 15: 0.647, 16: 0.624, 17: 0.605, 18: 0.589, 19: 0.575,
+           20: 0.561, 21: 0.547, 22: 0.534, 23: 0.521, 24: 0.509, 25: 0.498,
+           26: 0.487, 27: 0.477, 28: 0.467, 29: 0.457, 30: 0.448},
+}
+
+def _dixon_stat(sx, high=True):
+    """狄克松比值（sx 升序）。高端检 x_n、低端检 x_1，公式分段随 n（GB/T 4883-2008）。"""
+    n = len(sx)
+    if n < 3:
+        return None
+    if high:
+        if n <= 7:
+            return (sx[-1] - sx[-2]) / (sx[-1] - sx[0])          # r10
+        if n <= 10:
+            return (sx[-1] - sx[-2]) / (sx[-1] - sx[1])          # r11
+        if n <= 13:
+            return (sx[-1] - sx[-3]) / (sx[-1] - sx[1])          # r21
+        return (sx[-1] - sx[-3]) / (sx[-1] - sx[2])              # r22
+    if n <= 7:
+        return (sx[1] - sx[0]) / (sx[-1] - sx[0])                # r10'
+    if n <= 10:
+        return (sx[1] - sx[0]) / (sx[-2] - sx[0])                # r11'
+    if n <= 13:
+        return (sx[2] - sx[0]) / (sx[-2] - sx[0])                 # r21'
+    return (sx[2] - sx[0]) / (sx[-3] - sx[0])                     # r22'
+
+def _grubbs_crit(n, alpha):
+    """格拉布斯双侧临界值（Grubbs & Beck 1972 精确式，NIST/SEMATECH 手册采用）：
+    G = (n-1)/√n · √(t²/(n-2+t²))，t 为 t(n-2) 的 1-α/(2n) 分位数——由 _t_ppf 精确生成，
+    与教科书查表值一致（如 n=3 双侧 0.05 → 1.153），无需硬编码临界值表。"""
+    t = _t_ppf(1.0 - alpha / (2.0 * n), n - 2)
+    return (n - 1.0) / math.sqrt(n) * math.sqrt(t * t / (n - 2.0 + t * t))
+
+def _weibull_fit(xs):
+    """两参数 Weibull 拟合：中位秩（Bernard 公式 F_i=(i-0.3)/(n+0.4)）线性化最小二乘。
+    ln ln(1/(1-F)) = m·ln σ − m·ln σ₀ → 形状 m=斜率，尺度 σ₀=exp(−截距/m)。
+    返回 (m, sigma0, r2)；退化数据返回 None。"""
+    s = sorted(xs)
+    n = len(s)
+    lx = [math.log(v) for v in s]
+    ly = [math.log(math.log(1.0 / (1.0 - (i - 0.3) / (n + 0.4))))
+          for i in range(1, n + 1)]
+    coef = _polyfit(lx, ly, 1)
+    if coef is None or coef[1] <= 0:
+        return None
+    m = coef[1]
+    s0 = math.exp(-coef[0] / m)
+    my = sum(ly) / n
+    sst = sum((v - my) ** 2 for v in ly)
+    if sst <= 0:
+        return None
+    ssr = sum((y - (coef[0] + coef[1] * x)) ** 2 for x, y in zip(lx, ly))
+    return m, s0, 1.0 - ssr / sst
+
 def tool_stats(args):
-    """统计分析：describe / ttest / anova / normality / ci / power。"""
+    """统计分析：describe / ttest / anova / normality / ci / power / outlier / weibull。"""
     action = str(args.get("action", "describe")).lower()
     alpha = float(args.get("alpha", 0.05))
 
@@ -1674,7 +1742,8 @@ def tool_stats(args):
             lines.append("- 偏度 %s | 超额峰度 %s（总体矩，未做小样本校正）" %
                          (_fmt(sum((x - mean) ** 3 for x in xs) / n / m2 ** 1.5),
                           _fmt(sum((x - mean) ** 4 for x in xs) / n / m2 ** 2 - 3.0)))
-        lines.append("\n（正态性判断用 action=normality；组间比较用 ttest / anova；区间估计用 ci）")
+        lines.append("\n（正态性判断用 action=normality；组间比较用 ttest / anova；区间估计用 ci；"
+                     "异常值剔除用 outlier；强度散布 Weibull 用 weibull）")
         return "\n".join(lines)
 
     if action == "ttest":
@@ -1807,7 +1876,105 @@ def tool_stats(args):
                 "- δ = %s, 合并 sd = %s, 功效 %g, α = %g\n- 每组约需 **n = %d**（共 %d）\n"
                 "（正态近似，比精确 t 略保守；配对设计把 sd 换成差值标准差）"
                 % (_fmt(delta), _fmt(sd), pw, alpha, n1, 2 * n1))
-    return "❌ 未知 action：%s（支持 describe / ttest / anova / normality / ci / power）" % action
+
+    if action == "outlier":
+        # GB/T 4883 两级判定：≥ 0.01 临界 → 统计离群值（剔除）；
+        # 仅 ≥ 检出水平（alpha，默认 0.05）→ 歧离值（保留，提示查物理原因）
+        xs = vals("data")
+        if xs is None or len(xs) < 3:
+            return "❌ outlier 需要 data 数组（n ≥ 3）"
+        crit_name = str(args.get("criterion", "grubbs")).lower()
+        if crit_name not in ("grubbs", "dixon"):
+            return "❌ criterion 取 grubbs（默认，n 不限）| dixon（n ≤ 30，GB/T 4883 查表法）"
+        if crit_name == "dixon" and len(xs) > 30:
+            return "❌ 狄克松准则仅适用 n ≤ 30（国标表范围），请用 criterion=grubbs"
+        n0, cur = len(xs), list(xs)
+        lines, removed, rnd = [], [], 0
+        while len(cur) >= 3:
+            rnd += 1
+            s = sorted(cur)
+            n = len(s)
+            if crit_name == "grubbs":
+                mean, sd = sum(s) / n, _sstd(s)
+                if sd == 0:
+                    lines.append("- 第 %d 轮：数据无波动，停止" % rnd)
+                    break
+                hi, lo = s[-1] - mean, mean - s[0]
+                if hi >= lo:
+                    g, side, cand = hi / sd, "高", s[-1]
+                else:
+                    g, side, cand = lo / sd, "低", s[0]
+                c_hi, c_out = _grubbs_crit(n, 0.01), _grubbs_crit(n, alpha)
+                stat_name = "G = %s" % _fmt(g)
+            else:
+                rh, rl = _dixon_stat(s, True), _dixon_stat(s, False)
+                if rh is None or rl is None or s[-1] == s[0]:
+                    lines.append("- 第 %d 轮：数据无波动，停止" % rnd)
+                    break
+                if rh >= rl:
+                    d, side, cand = rh, "高", s[-1]
+                else:
+                    d, side, cand = rl, "低", s[0]
+                c_hi, c_out = _DIXON_TABLE[0.01][n], _DIXON_TABLE.get(round(alpha, 2), {}).get(n)
+                if c_out is None:
+                    return "❌ 狄克松表只支持检出水平 0.05 / 0.01，当前 alpha = %s" % _fmt(alpha)
+                stat_name = "D = %s" % _fmt(d)
+            stat_val = g if crit_name == "grubbs" else d
+            if stat_val >= c_hi:
+                removed.append(cand)
+                lines.append("- 第 %d 轮：%s端值 %s，%s ≥ 0.01 临界 %s → **统计离群值，剔除**"
+                             % (rnd, side, _fmt(cand), stat_name, _fmt(c_hi)))
+                cur.remove(cand)
+                continue
+            if stat_val >= c_out:
+                lines.append("- 第 %d 轮：%s端值 %s，%s ≥ %s 临界 %s 但 < 0.01 临界 %s → **歧离值，保留**（找不到物理原因就不剔除）"
+                             % (rnd, side, _fmt(cand), stat_name, _fmt(alpha), _fmt(c_out), _fmt(c_hi)))
+                break
+            lines.append("- 第 %d 轮：%s，小于 %s 临界 %s → 无异常，停止"
+                         % (rnd, stat_name, _fmt(alpha), _fmt(c_out)))
+            break
+        kept_n = len(cur)
+        lines.insert(0, "**异常值检验（GB/T 4883 · %s，n = %d → %d）**"
+                     % ("格拉布斯双侧（t 精确临界）" if crit_name == "grubbs" else "狄克松", n0, kept_n))
+        if removed:
+            lines.append("- 已剔除 %d 个（%s）" % (len(removed), ", ".join(_fmt(v) for v in removed)))
+            lines.append("- 保留 n = %d：均值 %s，标准差 %s（原：均值 %s，标准差 %s）"
+                         % (kept_n, _fmt(sum(cur) / kept_n), _fmt(_sstd(cur)),
+                            _fmt(sum(xs) / n0), _fmt(_sstd(xs))))
+            if len(removed) > max(1, n0 // 10):
+                lines.append("⚠ 剔除比例超过 1/10：优先怀疑测量系统或数据录入问题，不要机械剔除")
+            lines.append("（剔除后再做 normality 检验正态性；被剔除值务必在报告中交代）")
+        else:
+            lines.append("- 未剔除任何值，保留 n = %d" % kept_n)
+        return "\n".join(lines)
+
+    if action == "weibull":
+        xs = vals("data")
+        if xs is None or len(xs) < 3:
+            return "❌ weibull 需要 data（强度数组，n ≥ 3）"
+        if any(v <= 0 for v in xs):
+            return "❌ Weibull 拟合要求强度值全部为正"
+        fit = _weibull_fit(xs)
+        if fit is None:
+            return "❌ 数据退化（全部相同或无波动），无法拟合"
+        m, s0, r2 = fit
+        b10 = s0 * (-math.log(0.9)) ** (1.0 / m)
+        lines = ["**Weibull 强度分析（两参数，中位秩线性回归，n = %d）**" % len(xs),
+                 "- Weibull 模数 m = %s（散布越小越大；陶瓷/岩石典型 5~20）" % _fmt(m),
+                 "- 特征强度 σ₀ = %s（破坏概率 63.2%% 对应的应力水平）" % _fmt(s0),
+                 "- 线性化 R² = %s（< 0.95 时慎用两参数外推）" % _fmt(r2),
+                 "- B10 强度（破坏概率 10%%）= %s" % _fmt(b10)]
+        if args.get("stress") is not None:
+            sig = float(args["stress"])
+            if sig <= 0:
+                return "❌ stress 须为正应力值"
+            pf = 1.0 - math.exp(-((sig / s0) ** m))
+            lines.append("- 预测：σ = %s → 破坏概率 P_f = %s，存活率 %s"
+                         % (_fmt(sig), _fmt(pf), _fmt(1.0 - pf)))
+        lines.append("（n < 8 时 m 的估计误差大；未建模体积效应——不同尺寸试件的结果不能直接换算）")
+        return "\n".join(lines)
+
+    return "❌ 未知 action：%s（支持 describe / ttest / anova / normality / ci / power / outlier / weibull）" % action
 
 # ======================================================================
 # 8. 不确定度与误差传播（GUM 一阶，AST 数值偏导）
@@ -3029,21 +3196,23 @@ TOOLS = [
          "max_mb": {"type": "number", "description": "文件大小上限 MB，默认 50"}},
      "required": ["pdf_path"]}},
     {"name": "labmate_stats",
-     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算。",
+     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算 / outlier 异常值检验（GB/T 4883 格拉布斯 t 精确临界 + 狄克松查表，歧离值/统计离群值两级判定，迭代剔除）/ weibull 强度分析（中位秩线性回归：模数 m、特征强度 σ₀、B10、给定应力破坏概率）。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power"},
-         "data": {"type": "array", "description": "describe/normality/ci 的样本数组"},
+         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power|outlier|weibull"},
+         "data": {"type": "array", "description": "describe/normality/ci/outlier/weibull 的样本数组"},
          "a": {"type": "array", "description": "ttest 第一组"},
          "b": {"type": "array", "description": "ttest 第二组；不给则对 a 做 mu 单样本检验"},
          "mu": {"type": "number", "description": "单样本假设均值，默认 0"},
          "paired": {"type": "boolean", "description": "配对设计（a、b 等长）"},
          "equal_var": {"type": "boolean", "description": "两样本方差齐性假设（默认 false= Welch）"},
          "groups": {"type": "array", "description": "anova：≥2 组数值数组"},
-         "alpha": {"type": "number", "description": "显著性水平，默认 0.05"},
+         "alpha": {"type": "number", "description": "显著性水平，默认 0.05（outlier 中作歧离值检出水平）"},
          "confidence": {"type": "number", "description": "ci 置信水平，默认 0.95"},
          "delta": {"type": "number", "description": "power：要检出的均值差"},
          "sd": {"type": "number", "description": "power：合并标准差"},
-         "power": {"type": "number", "description": "power：目标功效，默认 0.8"}},
+         "power": {"type": "number", "description": "power：目标功效，默认 0.8"},
+         "criterion": {"type": "string", "description": "outlier：grubbs（默认，n 不限）| dixon（n ≤ 30）"},
+         "stress": {"type": "number", "description": "weibull：给定应力，返回破坏概率与存活率"}},
      "required": ["action"]}},
     {"name": "labmate_errors",
      "description": "不确定度分析（GUM）：propagate 一阶合成不确定度（公式+各分量贡献+k=2 扩展）/ regress OLS 斜率截距 95% 置信区间。",
