@@ -51,6 +51,8 @@ tau_res = tail[tail < F_peak].mean()
 
 **原则：滤波前后必须叠图对比展示（走 labmate-plot），让用户确认没滤掉真实物理信号。**
 
+**轻量需求走零依赖工具**：单次平滑/重采样/求曲线下面积不必写脚本，直接调 MCP 工具 `labmate_signal`（savgol/ma 平滑、线性插值、梯形/Simpson 积分、均匀重采样）；处理后的数据做显著性/不确定度分析走 `labmate_stats` / `labmate_errors`。
+
 ### 3. 设备导出文件的处理
 
 试验机导出的格式五花八门（CSV 表头、多列、单位行、时间戳）。处理流程：

@@ -1,6 +1,6 @@
 ---
 name: labmate
-description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、曲线拟合、公式推导、有限元、单位换算、论文图表、文献检索、本地 PDF 精读，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/symbols/fem/plot/rockmech/fracture/literature/disclosure）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「这个设备够不够」「拟合参数」「读一下这篇论文」等科研场景。
+description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、统计分析、曲线拟合、公式推导、有限元、单位换算、论文图表、LaTeX 写作、文献检索、本地 PDF 精读，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/stats/symbols/fem/plot/writing/rockmech/fracture/literature/disclosure）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「显著性检验」「设计正交试验」「这个设备够不够」「拟合参数」「读一下这篇论文」「做三线表」等科研场景。
 ---
 
 # LabMate 科研搭子 · 主路由
@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.3.0 · 十一件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.4.0 · 十七件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -19,6 +19,12 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 快速拟合（线性/幂律/指数 + R²） | `labmate_fit_lite` | 量级判断够用；物理约束与不确定性走 lmfit |
 | **本机试验数据摸底**（CSV 列统计） | `labmate_table` | 只读不写、数据不出本机；先体检再决定处理方案 |
 | **论文级图表样式** | `labmate_style` | ieee/nature/science/中文期刊四种，可写 .mplstyle |
+| **统计分析**（t 检验/ANOVA/正态性/置信区间/样本量） | `labmate_stats` | 零依赖精确 p 值 + Cohen's d/η² 效应量 |
+| **不确定度分析**（GUM 传播 / 回归参数 CI） | `labmate_errors` | 公式代入合成 u_c、k=2 扩展不确定度；斜率截距 95%CI |
+| **实验设计**（正交表/全因子/拉丁超立方） | `labmate_doe` | 素数域生成 L4-L32 标准正交表，正交性有数学保证 |
+| **LaTeX 写作生成**（三线表/图环境/公式） | `labmate_tex` | booktabs 三线表 CSV 直读、多图自动 subfigure |
+| **BibTeX 库工作台**（体检/合并/排序） | `labmate_bibtex` | 跨库去重合并（DOI 优先）、缺字段体检、按年/作者重排 |
+| **试验曲线信号处理**（平滑/插值/积分） | `labmate_signal` | SG 保峰形滤波、Simpson 精确积分、均匀重采样 |
 | **文献侦察**（多源聚合） | `labmate_search` | arXiv+Crossref+OpenAlex 并发去重，单源失败自动降级 |
 | **arXiv 单源检索** | `labmate_arxiv` | 官方 API 真实元数据，免费无 key |
 | **DOI → BibTeX** | `labmate_cite` | Crossref 真实元数据生成引用，杜绝幻觉文献 |
@@ -36,6 +42,9 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 需要一个可校核的计算过程（应力、载荷、安全系数） | `labmate-handcalc` |
 | 给了数据要求拟合参数、回归本构模型、参数反演 | `labmate-fit` |
 | 试验数据清洗、曲线特征提取、滤波、峰值/模量识别 | `labmate-data` |
+| 统计检验、显著性、样本量估算、p 值解读（t/ANOVA/正态性） | `labmate-stats` |
+| 实验方案设计、正交试验、因素水平安排、参数抽样 | `labmate-stats`（DOE 节） |
+| 论文写作：三线表、图表环境、公式排版、参考文献库管理 | `labmate-writing` |
 | 公式推导、解析解、微分方程、符号运算 | `labmate-symbols` |
 | 应力场/变形/有限元建模分析 | `labmate-fem` |
 | 要论文可用的图表 | `labmate-plot` |

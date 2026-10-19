@@ -8,18 +8,28 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.3.0 · 十一件套）：
+工具（0.4.0 · 十七件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
   labmate_mohr      Mohr 圆计算 + 纯 Python SVG 绘图
   labmate_fit_lite  内置最小二乘拟合（线性/二次/指数/幂律）+ R²
+  labmate_errors    不确定度传播（GUM 一阶数值偏导）+ 线性回归参数区间
+  统计组（零依赖，t/F/卡方分布精确尾概率）：
+  labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA / JB 正态性 / 置信区间 / 样本量
+  设计组（零依赖）：
+  labmate_doe       正交表(L4~L32/L9/L27/L25，素数域生成) / 全因子 / 拉丁超立方
+  labmate_signal    移动平均与 Savitzky-Golay 平滑 / 线性插值 / 梯形与 Simpson 积分 / 重采样
+  数据组（零依赖，只读本机）：
   labmate_table    本机试验数据体检：CSV 读取 + 列统计摘要（csv 模块，零依赖）
   labmate_style    期刊绘图样式注入：ieee/nature/science/中文期刊（SciencePlots 逆向）
   labmate_deps     科学栈体检（探测 numpy/scipy/lmfit/sympy/matplotlib/pyvista）
+  写作组（零依赖）：
+  labmate_tex      LaTeX 三线表(booktabs)/图环境/公式环境生成
+  labmate_bibtex   BibTeX 库体检（必填字段/重复 key/DOI/标题）与多文件去重合并
   文献组（标准库 urllib，需联网）：
   labmate_arxiv    arXiv 检索（官方免费 API，无需 key）
-  labmate_cite     DOI → 真实元数据 + 规范 BibTeX（Crossref，杜绝幻觉引用）
+  labmate_cite     DOI → 真实元数据 + 规范 BibTeX（Crossref，杜绝幻觉引用；可对既有库 key 去重）
   labmate_search   多源文献聚合：arXiv + Crossref + OpenAlex 并发检索 + 跨源去重
   本地组（零依赖，离线可用，数据不出本机）：
   labmate_pdf      本地 PDF 按页文本提取 + 关键词页码溯源（接地问答素材，扫描版诚实诊断）
@@ -29,6 +39,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 """
 
 import ast
+import bisect
 import concurrent.futures
 import csv
 import difflib
@@ -45,7 +56,7 @@ import xml.etree.ElementTree as ET
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.4.0"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -184,7 +195,11 @@ def _latex_expr(node):
     if isinstance(node, ast.Name):
         return _latex_name(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        return ("-" if isinstance(node.op, ast.USub) else "+") + _latex_expr(node.operand)
+        sign = "-" if isinstance(node.op, ast.USub) else "+"
+        inner = _latex_expr(node.operand)
+        if isinstance(node.operand, ast.BinOp) and isinstance(node.operand.op, (ast.Add, ast.Sub)):
+            inner = "\\left(%s\\right)" % inner  # -(a+b) → -\left(a + b\right)
+        return sign + inner
     if isinstance(node, ast.BinOp):
         l, r = _latex_expr(node.left), _latex_expr(node.right)
         if isinstance(node.op, ast.Add):
@@ -196,6 +211,8 @@ def _latex_expr(node):
         if isinstance(node.op, ast.Div):
             return "\\frac{%s}{%s}" % (l, r)
         if isinstance(node.op, ast.Pow):
+            if isinstance(node.left, (ast.BinOp, ast.UnaryOp)):
+                l = "\\left(%s\\right)" % l  # (-2)**2 → \left(-2\right)^{2}
             return "{%s}^{%s}" % (l, r)
         if isinstance(node.op, ast.Mod):
             return "%s \\bmod %s" % (l, r)
@@ -276,7 +293,7 @@ def tool_mohr(args):
     for s1, s3, sc, r in circles:
         lines.append("- σ1=%s, σ3=%s → 圆心 σc=%s, 半径 r=%s（最大剪应力 τmax = %s）" %
                      (_fmt(s1), _fmt(s3), _fmt(sc), _fmt(r), _fmt(r)))
-    if c is not None and phi:
+    if c is not None and phi is not None:
         phi_r = math.radians(phi)
         lines.append("\n**Mohr-Coulomb 包络**：τ = %s + σn·tan(%s°)，tanφ = %s" %
                      (_fmt(c), phi, _fmt(math.tan(phi_r))))
@@ -323,7 +340,7 @@ def _mohr_svg(circles, c, phi, w=520, h=400):
                      (X(sc), Y(0), rx, ry))
         parts.append('<text x="%f" y="%f" font-size="11" fill="#555" text-anchor="middle">σc=%g, r=%g</text>' %
                      (X(sc), Y(-r) + 14, sc, r))
-    if c is not None and phi:
+    if c is not None and phi is not None:
         phi_r = math.radians(phi)
         x2 = xmax
         y2 = c + x2 * math.tan(phi_r)
@@ -407,13 +424,41 @@ def tool_fit(args):
 # 4.5 本机试验数据体检（csv 零依赖）
 # ======================================================================
 def _sniff_delimiter(sample):
-    """从文本样本自动探测分隔符（逗号/制表/分号/竖线）"""
-    best, best_n = ",", 0
+    """探测分隔符（逗号/制表/分号/竖线）：优先每行列数一致的候选，其次列数多者。"""
+    lines = [l for l in sample.splitlines()[:5] if l.strip()]
+    if not lines:
+        return ","
+    cands = []
     for d in [",", "\t", ";", "|"]:
-        n = max(line.count(d) for line in sample.splitlines()[:5] if line.strip())
-        if n > best_n:
-            best, best_n = d, n
-    return best
+        counts = [l.count(d) for l in lines]
+        if max(counts) == 0:
+            continue
+        cands.append((len(set(counts)) == 1, max(counts), d))
+    if not cands:
+        return ","
+    cands.sort(reverse=True)
+    return cands[0][2]
+
+_THOUS_RE = re.compile(r"\d{1,3}(,\d{3})+(\.\d+)?$")
+_EURO_RE = re.compile(r"\d+,\d{1,2}$")
+
+def _parse_cell_float(s):
+    """单元格 → float：识别美式千分位（1,234.5）与欧式小数（1234,5）。
+    "1,234" 按千分位（1234）而非欧式（1.234）处理——两者歧义时取更常见的。
+    返回 None 表示非数值。"""
+    s = str(s).strip()
+    if not s:
+        return None
+    neg = s.startswith("-")
+    core = s[1:] if neg else s
+    v = None
+    if _THOUS_RE.fullmatch(core) or re.fullmatch(r"\d+(\.\d+)?", core):
+        v = float(core.replace(",", ""))
+    elif _EURO_RE.fullmatch(core):
+        v = float(core.replace(",", "."))
+    if v is None:
+        return None
+    return -v if neg else v
 
 def _table_summary(rows, header):
     """对已解析的行集做列统计。数值列给 n/均值/标准差/极值/缺失，文本列给唯一值/缺失。"""
@@ -428,20 +473,22 @@ def _table_summary(rows, header):
                 continue
             vals.append(r[ci])
         # 判断整列是否数值（存在非数值则不是）
-        is_num = True
-        nums = []
+        is_num, nums, euro = True, [], False
         for v in vals:
-            try:
-                nums.append(float(str(v).replace(",", "")))
-            except ValueError:
+            fv = _parse_cell_float(v)
+            if fv is None:
                 is_num = False
                 break
+            if _EURO_RE.fullmatch(str(v).strip().lstrip("-")):
+                euro = True
+            nums.append(fv)
         if is_num and nums:
             n = len(nums)
             mean = sum(nums) / n
             std = math.sqrt(sum((x - mean) ** 2 for x in nums) / (n - 1)) if n > 1 else 0.0
-            lines.append("- **%s**（数值列，n=%d，缺失 %d）：均值 %s，标准差 %s，min %s，max %s" %
-                         (name, n, missing, _fmt(mean), _fmt(std), _fmt(min(nums)), _fmt(max(nums))))
+            note = "，检测到欧式小数（逗号作小数点）已按此解析" if euro else ""
+            lines.append("- **%s**（数值列，n=%d，缺失 %d%s）：均值 %s，标准差 %s，min %s，max %s" %
+                         (name, n, missing, note, _fmt(mean), _fmt(std), _fmt(min(nums)), _fmt(max(nums))))
         else:
             uniq = len(set(str(v) for v in vals))
             lines.append("- **%s**（文本列，n=%d，缺失 %d，唯一值 %d）" % (name, len(vals), missing, uniq))
@@ -597,8 +644,12 @@ def tool_arxiv(args):
     lines.append("\n（来源：arXiv 官方 API，真实元数据。精读建议让 AI 提取方法/样本量/结论三点结构。）")
     return "\n".join(lines)
 
-def _make_bibtex(meta):
-    """Crossref 元数据 → 规范 BibTeX（独立函数便于离线单测）。"""
+def _tex_escape(s):
+    """LaTeX/BibTeX 特殊字符转义：& % $ # _。"""
+    return re.sub(r"([&%$#_])", r"\\\1", str(s))
+
+def _make_bibtex(meta, used_keys=None):
+    """Crossref 元数据 → 规范 BibTeX。used_keys 传入既有库的 key 集合时自动加 a/b 后缀防撞。"""
     kind = meta.get("type", "journal-article")
     entry = {"journal-article": "article", "proceedings-article": "inproceedings",
              "book-chapter": "incollection", "book": "book",
@@ -611,19 +662,24 @@ def _make_bibtex(meta):
     except Exception:
         pass
     key = (authors[0]["family"] if authors else "anon") + str(year or "xxxx")
+    if used_keys:
+        base, suf, i = key, "abcdefghijklmnopqrstuvwxyz", 0
+        while key in used_keys and i < 26:
+            key = base + suf[i]
+            i += 1
     f = []
     def add(field, val):
         if val:
             f.append("  %-14s = {%s}" % (field, val))
     add("author", au)
-    add("title", meta.get("title", [""])[0] if meta.get("title") else "")
+    add("title", _tex_escape(meta.get("title", [""])[0] if meta.get("title") else ""))
     if entry == "article":
-        add("journal", meta.get("container-title", [""])[0] if meta.get("container-title") else "")
+        add("journal", _tex_escape(meta.get("container-title", [""])[0] if meta.get("container-title") else ""))
         add("volume", meta.get("volume", ""))
         add("number", meta.get("issue", ""))
         add("pages", (meta.get("page", "") or "").replace("-", "--"))
     elif entry == "inproceedings":
-        add("booktitle", meta.get("container-title", [""])[0] if meta.get("container-title") else "")
+        add("booktitle", _tex_escape(meta.get("container-title", [""])[0] if meta.get("container-title") else ""))
     add("publisher", meta.get("publisher", ""))
     add("year", year)
     add("doi", meta.get("DOI", ""))
@@ -633,6 +689,19 @@ def tool_cite(args):
     doi = (args.get("doi") or "").strip()
     if not doi:
         return "❌ 请给 DOI，如 10.1016/j.ijrockmas.2019.104123"
+    used, bib_note = None, ""
+    bib_file = args.get("bib_file")
+    if bib_file:
+        used = set()
+        if os.path.exists(bib_file):
+            try:
+                with open(bib_file, "r", encoding="utf-8", errors="replace") as f:
+                    used = set(re.findall(r"@\w+\s*\{\s*([^,\s{}]+)\s*,", f.read()))
+                bib_note = "\n（已读取你的库文件，自动避开 %d 个既有 key 防撞。）" % len(used)
+            except Exception as exc:
+                return "⚠ 读取 bib_file 失败：%s" % exc
+        else:
+            bib_note = "\n（bib_file 尚不存在，将作为你的第一个库文件。）"
     url = "https://api.crossref.org/works/%s?mailto=labmate@local" % urllib.parse.quote(doi)
     try:
         raw = _http_get(url)
@@ -643,14 +712,15 @@ def tool_cite(args):
         return "⚠ 网络查询失败（HTTP %s）：确认可访问 api.crossref.org。" % exc.code
     except Exception as exc:
         return "⚠ 网络查询失败：%s" % exc
-    bib = _make_bibtex(meta)
+    bib = _make_bibtex(meta, used_keys=used)
     title = meta.get("title", ["(无题)"])[0]
     lines = ["**DOI 元数据**（Crossref，真实数据）",
              "标题：%s" % title,
              "类型：%s | DOI: %s" % (meta.get("type", "?"), meta.get("DOI", "")),
              "\n**BibTeX**：\n```\n%s\n```" % bib,
+             bib_note,
              "\n（元数据来自 Crossref 官方库，可放心用于 LaTeX；格式可再让 AI 按目标期刊微调。）"]
-    return "\n".join(lines)
+    return "\n".join([l for l in lines if l])
 
 # ======================================================================
 # 4.8 多源文献聚合：arXiv + Crossref + OpenAlex 并发检索 + 跨源去重
@@ -1163,6 +1233,980 @@ def tool_pdf(args):
     return "❌ 未知 action：%s（支持 stats / extract / search）" % action
 
 # ======================================================================
+# 7. 统计推断（零依赖：t/F 分布经正则化不完全 Beta，卡方经不完全 Gamma）
+# ======================================================================
+def _gammln(x):
+    """ln Γ(x)，Lanczos 近似（g=7），|误差| < 1e-13。"""
+    coef = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+            771.32342877765313, -176.61502916214059, 12.507343278686905,
+            -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
+    if x < 0.5:
+        return math.log(math.pi / math.sin(math.pi * x)) - _gammln(1.0 - x)
+    x -= 1.0
+    a, t = coef[0], x + 7.5
+    for i in range(1, 9):
+        a += coef[i] / (x + i)
+    return 0.5 * math.log(2 * math.pi) + (x + 0.5) * math.log(t) - t + math.log(a)
+
+def _betacf(a, b, x):
+    """正则化不完全 Beta 的修正 Lentz 连分数（Numerical Recipes）。"""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    if abs(d) < tiny:
+        d = tiny
+    d = 1.0 / d
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        de = d * c
+        h *= de
+        if abs(de - 1.0) < 1e-12:
+            break
+    return h
+
+def _betai(a, b, x):
+    """正则化不完全 Beta 函数 I_x(a,b)。"""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    ln_bt = (_gammln(a + b) - _gammln(a) - _gammln(b)
+             + a * math.log(x) + b * math.log(1.0 - x))
+    bt = math.exp(ln_bt)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+def _t_sf(t, df):
+    """t 分布上侧尾概率 P(T > t)（t 取绝对值）。"""
+    if df <= 0:
+        return float("nan")
+    t = abs(float(t))
+    return 0.5 * _betai(df / 2.0, 0.5, df / (df + t * t))
+
+def _f_sf(f, df1, df2):
+    """F 分布上侧尾概率 P(F > f)。"""
+    if f <= 0:
+        return 1.0
+    return _betai(df2 / 2.0, df1 / 2.0, df2 / (df2 + df1 * f))
+
+def _chi2_sf(x, df):
+    """卡方分布上侧尾概率（级数 + 修正 Lentz 连分数）。"""
+    if x <= 0:
+        return 1.0
+    a, half = df / 2.0, x / 2.0
+    front = math.exp(-half + a * math.log(half) - _gammln(a))
+    if half < a + 1.0:
+        summ, term, ap = 0.0, front / a, a
+        for _ in range(1000):
+            summ += term
+            ap += 1.0
+            term *= half / ap
+            if abs(term) < abs(summ) * 1e-15:
+                break
+        return 1.0 - summ
+    tiny = 1e-30
+    b, d = half + 1.0 - a, 1.0 / (half + 1.0 - a)
+    if abs(d) < tiny:
+        d = tiny
+    c, h = 1.0 / tiny, d
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        de = d * c
+        h *= de
+        if abs(de - 1.0) < 1e-15:
+            break
+    return front * h
+
+def _t_ppf(p, df):
+    """t 分布分位数（P(T ≤ t) = p），二分法。"""
+    lo, hi = -1e3, 1e3
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if 1.0 - _t_sf(mid, df) < p:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+def _norm_ppf(p):
+    """标准正态分位数，二分法（erf 为 math 内置）。"""
+    lo, hi = -10.0, 10.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if 0.5 * (1.0 + math.erf(mid / math.sqrt(2.0))) < p:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+def _sstd(xs):
+    """样本标准差（n-1 分母）。"""
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    m = sum(xs) / n
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / (n - 1))
+
+def _quantile(sx, q):
+    """有序数组分位数（线性插值，与 numpy 默认一致）。"""
+    n = len(sx)
+    if n == 1:
+        return sx[0]
+    pos = q * (n - 1)
+    lo = int(math.floor(pos))
+    frac = pos - lo
+    hi = min(lo + 1, n - 1)
+    return sx[lo] * (1 - frac) + sx[hi] * frac
+
+def tool_stats(args):
+    """统计分析：describe / ttest / anova / normality / ci / power。"""
+    action = str(args.get("action", "describe")).lower()
+    alpha = float(args.get("alpha", 0.05))
+
+    def vals(key):
+        raw = args.get(key)
+        if isinstance(raw, list) and raw:
+            try:
+                return [float(v) for v in raw]
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def p_line(p):
+        if p is None or math.isnan(p):
+            return "p = NaN"
+        if p < 1e-4:
+            return "p = %.2e" % p
+        return "p = %.4f" % p
+
+    if action == "describe":
+        xs = vals("data")
+        if xs is None:
+            return "❌ 请给 data 数组（数值）"
+        n = len(xs)
+        mean = sum(xs) / n
+        sd = _sstd(xs)
+        s = sorted(xs)
+        lines = ["**描述统计（n = %d）**" % n,
+                 "- 均值 %s | 样本标准差 %s | 标准误 %s" %
+                 (_fmt(mean), _fmt(sd), _fmt(sd / math.sqrt(n))),
+                 "- 中位数 %s | Q1 %s | Q3 %s" %
+                 (_fmt(_quantile(s, 0.5)), _fmt(_quantile(s, 0.25)), _fmt(_quantile(s, 0.75))),
+                 "- min %s | max %s | 极差 %s" % (_fmt(s[0]), _fmt(s[-1]), _fmt(s[-1] - s[0]))]
+        if n >= 3 and sd > 0:
+            m2 = sum((x - mean) ** 2 for x in xs) / n
+            lines.append("- 偏度 %s | 超额峰度 %s（总体矩，未做小样本校正）" %
+                         (_fmt(sum((x - mean) ** 3 for x in xs) / n / m2 ** 1.5),
+                          _fmt(sum((x - mean) ** 4 for x in xs) / n / m2 ** 2 - 3.0)))
+        lines.append("\n（正态性判断用 action=normality；组间比较用 ttest / anova；区间估计用 ci）")
+        return "\n".join(lines)
+
+    if action == "ttest":
+        a = vals("a")
+        if a is None or len(a) < 2:
+            return "❌ ttest 需要 a 数组（n ≥ 2）"
+        na, ma = len(a), sum(a) / len(a)
+        b = vals("b")
+        if b is None:
+            mu = float(args.get("mu", 0.0))
+            sd = _sstd(a)
+            if sd == 0:
+                return "❌ a 的方差为 0，无法检验"
+            t = (ma - mu) / (sd / math.sqrt(na))
+            df, p = na - 1, 2 * _t_sf(t, na - 1)
+            return ("**单样本 t 检验**（n = %d）\nH0: μ = %s\n- t = %s, df = %d, %s\n"
+                    "- 均值 %s, 标准差 %s, Cohen's d = %s\n- 结论：%s（α = %s）"
+                    % (na, _fmt(mu), _fmt(t), df, p_line(p), _fmt(ma), _fmt(sd),
+                       _fmt((ma - mu) / sd), "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha)))
+        if args.get("paired"):
+            if len(b) != na:
+                return "❌ 配对检验要求 a、b 等长"
+            dd = [x - y for x, y in zip(a, b)]
+            nd, md = len(dd), sum(dd) / len(dd)
+            sdd = _sstd(dd)
+            if sdd == 0:
+                return "❌ 差值方差为 0，无法检验"
+            t = md / (sdd / math.sqrt(nd))
+            p = 2 * _t_sf(t, nd - 1)
+            return ("**配对 t 检验**（n = %d 对）\n- 差值均值 %s，差值标准差 %s\n"
+                    "- t = %s, df = %d, %s\n- 结论：%s（α = %s）"
+                    % (nd, _fmt(md), _fmt(sdd), _fmt(t), nd - 1, p_line(p),
+                       "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha)))
+        nb, mb = len(b), sum(b) / len(b)
+        va = sum((x - ma) ** 2 for x in a) / (na - 1)
+        vb = sum((x - mb) ** 2 for x in b) / (nb - 1)
+        if va <= 0 or vb <= 0:
+            return "❌ 某组方差为 0，无法检验"
+        if args.get("equal_var"):
+            sp2 = ((na - 1) * va + (nb - 1) * vb) / (na + nb - 2)
+            se, df = math.sqrt(sp2 * (1.0 / na + 1.0 / nb)), na + nb - 2
+            kind = "合并方差 Student t"
+        else:
+            se = math.sqrt(va / na + vb / nb)
+            df = (va / na + vb / nb) ** 2 / ((va / na) ** 2 / (na - 1) + (vb / nb) ** 2 / (nb - 1))
+            kind = "Welch（默认，不假设方差齐性）"
+        t = (ma - mb) / se
+        p = 2 * _t_sf(t, df)
+        sp = math.sqrt(((na - 1) * va + (nb - 1) * vb) / (na + nb - 2))
+        return ("**两独立样本 t 检验（%s）**\nH0: μ1 = μ2\n- A: n=%d，均值 %s；B: n=%d，均值 %s\n"
+                "- t = %s, df = %s, %s\n- Cohen's d = %s\n- 结论：%s（α = %s）"
+                % (kind, na, _fmt(ma), nb, _fmt(mb), _fmt(t), _fmt(df), p_line(p),
+                   _fmt((ma - mb) / sp) if sp > 0 else "N/A",
+                   "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha)))
+
+    if action == "anova":
+        groups = args.get("groups")
+        if not isinstance(groups, list) or len(groups) < 2:
+            return "❌ anova 需要 groups（≥2 个数值数组的数组）"
+        try:
+            gs = [[float(v) for v in g] for g in groups]
+        except (TypeError, ValueError):
+            return "❌ groups 每个元素须为数值数组"
+        if any(len(g) < 2 for g in gs):
+            return "❌ 每组至少 2 个样本"
+        N, k = sum(len(g) for g in gs), len(gs)
+        grand = sum(sum(g) for g in gs) / N
+        ssb = sum(len(g) * (sum(g) / len(g) - grand) ** 2 for g in gs)
+        ssw = sum(sum((x - sum(g) / len(g)) ** 2 for x in g) for g in gs)
+        msw = ssw / (N - k)
+        if msw == 0:
+            return "❌ 组内方差为 0（各组内部无波动），无法检验"
+        F, p = (ssb / (k - 1)) / msw, _f_sf((ssb / (k - 1)) / msw, k - 1, N - k)
+        return ("**单因素方差分析（k = %d 组，N = %d）**\nH0: 各组总体均值相等\n"
+                "- 组均值：%s\n- F = %s, df = (%d, %d), %s\n- 效应量 η² = %s\n- 结论：%s（α = %s）\n"
+                "（显著 ≠ 两两都不同；事后比较请用 Bonferroni 校正：α ÷ %d 组对）"
+                % (k, N, ", ".join("%s(n=%d)" % (_fmt(sum(g) / len(g)), len(g)) for g in gs),
+                   _fmt(F), k - 1, N - k, p_line(p), _fmt(ssb / (ssb + ssw)),
+                   "拒绝 H0（至少一组均值不同）" if p < alpha else "不拒绝 H0", _fmt(alpha),
+                   k * (k - 1) // 2))
+
+    if action == "normality":
+        xs = vals("data")
+        if xs is None or len(xs) < 8:
+            return "❌ normality 建议 n ≥ 8（JB 检验小样本功效低）"
+        n = len(xs)
+        mean = sum(xs) / n
+        m2 = sum((x - mean) ** 2 for x in xs) / n
+        if m2 == 0:
+            return "❌ 数据无波动"
+        skew = sum((x - mean) ** 3 for x in xs) / n / m2 ** 1.5
+        kurt = sum((x - mean) ** 4 for x in xs) / n / m2 ** 2
+        jb = n / 6.0 * (skew ** 2 + (kurt - 3) ** 2 / 4.0)
+        p = _chi2_sf(jb, 2)
+        return ("**正态性检验（Jarque-Bera）**\n- 偏度 %s（正态为 0）| 峰度 %s（正态为 3）\n"
+                "- JB = %s, %s\n- 结论：%s（α = %s）\n"
+                "（n < 30 时 JB 功效有限：p > α 只是'未测出非正态'，不是'证明正态'；"
+                "严格场景用 scipy.stats.shapiro 复核）"
+                % (_fmt(skew), _fmt(kurt), _fmt(jb), p_line(p),
+                   "拒绝正态假设" if p < alpha else "未发现偏离正态", _fmt(alpha)))
+
+    if action == "ci":
+        xs = vals("data")
+        if xs is None or len(xs) < 2:
+            return "❌ ci 需要 data（n ≥ 2）"
+        conf = float(args.get("confidence", 0.95))
+        if not (0.5 < conf < 0.999):
+            return "❌ confidence 取值 (0.5, 0.999)"
+        n, mean = len(xs), sum(xs) / len(xs)
+        sd = _sstd(xs)
+        tc = _t_ppf(1 - (1 - conf) / 2, n - 1)
+        half = tc * sd / math.sqrt(n)
+        return ("**均值的置信区间（t 区间，置信水平 %g%%）**\n- n = %d, 均值 %s, 标准差 %s, t 临界值 %s\n"
+                "- CI = [%s, %s]（半宽 %s）\n（方差未知用 t 不用 z；sd=0 时区间退化为点）"
+                % (conf * 100, n, _fmt(mean), _fmt(sd), _fmt(tc),
+                   _fmt(mean - half), _fmt(mean + half), _fmt(half)))
+
+    if action == "power":
+        delta, sd = args.get("delta"), args.get("sd")
+        if delta is None or sd is None:
+            return "❌ power 需要 delta（要检出的均值差）与 sd（合并标准差）"
+        delta, sd = float(delta), float(sd)
+        if sd <= 0 or delta == 0:
+            return "❌ delta、sd 须 > 0"
+        pw, alpha = float(args.get("power", 0.8)), float(args.get("alpha", 0.05))
+        if not (0.5 < pw < 0.999) or not (0.001 < alpha < 0.5):
+            return "❌ power 取值 (0.5, 0.999)，alpha 取值 (0.001, 0.5)"
+        n1 = math.ceil(2 * ((_norm_ppf(1 - alpha / 2) + _norm_ppf(pw)) * sd / delta) ** 2)
+        return ("**两独立样本 t 检验的样本量估算（正态近似）**\n"
+                "- δ = %s, 合并 sd = %s, 功效 %g, α = %g\n- 每组约需 **n = %d**（共 %d）\n"
+                "（正态近似，比精确 t 略保守；配对设计把 sd 换成差值标准差）"
+                % (_fmt(delta), _fmt(sd), pw, alpha, n1, 2 * n1))
+    return "❌ 未知 action：%s（支持 describe / ttest / anova / normality / ci / power）" % action
+
+# ======================================================================
+# 8. 不确定度与误差传播（GUM 一阶，AST 数值偏导）
+# ======================================================================
+def tool_errors(args):
+    action = str(args.get("action", "propagate")).lower()
+    if action == "propagate":
+        formula = (args.get("formula") or "").strip()
+        vs, us = args.get("vars") or {}, args.get("uncertainties") or {}
+        if not formula or not vs:
+            return "❌ propagate 需要 formula 与 vars={符号: 数值}，uncertainties={符号: u(x)}"
+        try:
+            variables = {str(k): float(v) for k, v in vs.items()}
+        except (TypeError, ValueError):
+            return "❌ vars 的值须为数值"
+        uncs = {}
+        for k, v in us.items():
+            try:
+                uncs[str(k)] = float(v)
+            except (TypeError, ValueError):
+                return "❌ uncertainties 的值须为数值：%s" % k
+        try:
+            base = _safe_eval(formula, variables)
+        except Exception as exc:
+            return "❌ 公式求值失败：%s" % exc
+        lines = ["**不确定度传播（GUM 一阶）**：y = %s" % formula, "y = %s" % _fmt(base)]
+        total, contribs = 0.0, []
+        for name in sorted(uncs):
+            ux = uncs[name]
+            if ux < 0:
+                return "❌ %s 的不确定度为负" % name
+            if name not in variables:
+                continue
+            h = max(abs(variables[name]), 1.0) * 1e-6
+            up, lo = dict(variables), dict(variables)
+            up[name] = variables[name] + h
+            lo[name] = variables[name] - h
+            try:
+                deriv = (_safe_eval(formula, up) - _safe_eval(formula, lo)) / (2 * h)
+            except Exception:
+                deriv = float("nan")
+            c = deriv * ux
+            contribs.append((name, ux, deriv, c))
+            total += c * c
+        if not contribs:
+            return "❌ 公式中的符号没有对应不确定度：%s" % formula
+        uc = math.sqrt(total)
+        rel = abs(uc / base) if base else float("nan")
+        for name, ux, deriv, c in contribs:
+            lines.append("- %s = %s ± %s → ∂y/∂%s = %s → 贡献 %s"
+                          % (name, _fmt(variables[name]), _fmt(ux), name, _fmt(deriv), _fmt(abs(c))))
+        lines.append("\n**合成标准不确定度 u_c = %s**（相对 %s）"
+                     % (_fmt(uc), _fmt(rel) if not math.isnan(rel) else "∞"))
+        lines.append("**扩展不确定度 U（k=2，约 95%%）= %s**" % _fmt(2 * uc))
+        lines.append("结果：**y = %s ± %s**（k=2）" % (_fmt(base), _fmt(2 * uc)))
+        lines.append("（一阶传播忽略高阶项与相关性；强相关输入须人工合成协方差项）")
+        return "\n".join(lines)
+    if action == "regress":
+        xs = [float(v) for v in (args.get("x") or [])]
+        ys = [float(v) for v in (args.get("y") or [])]
+        n = len(xs)
+        if n < 3 or n != len(ys):
+            return "❌ regress 需要 x / y 等长且 n ≥ 3"
+        xbar, ybar = sum(xs) / n, sum(ys) / n
+        sxx = sum((x - xbar) ** 2 for x in xs)
+        if sxx == 0:
+            return "❌ x 无波动"
+        sxy = sum((x - xbar) * (y - ybar) for x, y in zip(xs, ys))
+        slope, intercept = sxy / sxx, ybar - (sxy / sxx) * xbar
+        sse = sum((y - (intercept + slope * x)) ** 2 for x, y in zip(xs, ys))
+        s_res = math.sqrt(sse / (n - 2))
+        sb, sa = s_res / math.sqrt(sxx), s_res * math.sqrt(1.0 / n + xbar * xbar / sxx)
+        tc = _t_ppf(0.975, n - 2)
+        sst = sum((y - ybar) ** 2 for y in ys)
+        r = sxy / math.sqrt(sxx * sst) if sst > 0 else float("nan")
+        return ("**线性回归不确定度（OLS，95%% CI）**\n- 斜率 b = %s ± %s（95%%CI [%s, %s]）\n"
+                "- 截距 a = %s ± %s（95%%CI [%s, %s]）\n- 残差标准差 s = %s | 相关系数 r = %s\n"
+                "（n-2 = %d；x 重复测量或 x 有误差时此区间偏乐观——请用正交回归）"
+                % (_fmt(slope), _fmt(sb), _fmt(slope - tc * sb), _fmt(slope + tc * sb),
+                   _fmt(intercept), _fmt(sa), _fmt(intercept - tc * sa), _fmt(intercept + tc * sa),
+                   _fmt(s_res), _fmt(r), n - 2))
+    return "❌ 未知 action：%s（支持 propagate / regress）" % action
+
+# ======================================================================
+# 9. 实验设计（零依赖：素数域生成正交表 / 全因子 / 拉丁超立方）
+# ======================================================================
+def _gf_runs(p, k):
+    """p^k 个运行的基因素水平组合（标准序：因子 A 变化最慢）。"""
+    runs = []
+    for i in range(p ** k):
+        v, row = i, [0] * k
+        for j in range(k - 1, -1, -1):
+            row[j] = v % p
+            v //= p
+        runs.append(row)
+    return runs
+
+def _coeff_vectors(p, k):
+    """按（最高非零位置，字典序）枚举 GF(p)^k 非零向量：A; B,A+B,2A+B; C,..."""
+    out = []
+    for hi in range(k):
+        lowers = [[]]
+        for _ in range(hi):
+            lowers = [pre + [v] for pre in lowers for v in range(p)]
+        for lead in range(1, p):
+            for pre in lowers:
+                out.append(tuple(pre + [lead] + [0] * (k - hi - 1)))
+    return out
+
+def _vec_norm(vec, p):
+    """系数向量按首非零元归一（去比例重复）。"""
+    lead = 0
+    for v in vec:
+        if v % p:
+            lead = v % p
+            break
+    if lead == 0:
+        return tuple(vec)
+    inv = next(i for i in range(1, p) if (lead * i) % p == 1)
+    return tuple((x * inv) % p for x in vec)
+
+def _ortho_design(p, k, max_cols):
+    """GF(p) 上生成正交表列（与经典 Taguchi 表等价：任两列正交）。"""
+    runs = _gf_runs(p, k)
+    cols, seen = [], set()
+    for vec in _coeff_vectors(p, k):
+        nv = _vec_norm(vec, p)
+        if nv in seen:
+            continue
+        seen.add(nv)
+        col = tuple(sum(vec[j] * r[j] for j in range(k)) % p for r in runs)
+        cols.append((vec, col))
+        if len(cols) >= max_cols:
+            break
+    return runs, cols
+
+def tool_doe(args):
+    action = str(args.get("action", "ortho")).lower()
+    if action == "ortho":
+        runs_name = args.get("runs")
+        if runs_name:
+            m = re.match(r"L(\d+)", str(runs_name).upper())
+            if not m:
+                return "❌ runs 应形如 L8 / L9 / L16"
+            spec = {4: (2, 2), 8: (2, 3), 9: (3, 2), 16: (2, 4),
+                    25: (5, 2), 27: (3, 3), 32: (2, 5)}
+            n_runs = int(m.group(1))
+            if n_runs not in spec:
+                return ("❌ 支持 L4/L8/L16/L32/L9/L27/L25（素数幂标准表）；"
+                        "混水平表 L12/L18 不在零依赖范围内，改用 fullfact 筛选")
+            p, k = spec[n_runs]
+        elif args.get("p"):
+            p, k = int(args["p"]), int(args.get("factors", 2))
+            if p not in (2, 3, 5, 7) or k < 2 or p ** k > 128:
+                return "❌ p 支持 2/3/5/7，factors ≥ 2，且运行数 p^factors ≤ 128"
+            n_runs = p ** k
+        else:
+            return "❌ ortho 需要 runs=L8 这类标准表名，或 p=2/3/5/7 + factors"
+        want = int(args.get("max_factors") or min(15, n_runs - 1))
+        want = max(1, min(want, n_runs - 1))
+        base_rows, cols = _ortho_design(p, k, want)
+        lines = ["**正交表 L%d(%d^%d)**（%d 次运行 × %d 列因素，素数域生成保证正交性）"
+                 % (n_runs, p, len(cols), n_runs, len(cols)),
+                 "\n| Run | %s |" % " | ".join("F%d" % (i + 1) for i in range(len(cols))),
+                 "|---|%s|" % ("---|" * len(cols))]
+        col_vals = [c[1] for c in cols]
+        for ri in range(n_runs):
+            lines.append("| %d | %s |" % (ri + 1, " | ".join(str(col_vals[ci][ri] + 1)
+                                                            for ci in range(len(cols)))))
+        lines.append("\n正交性：任两列的水平组合各出现 %d 次。水平用 1 起编号。"
+                     "用法：可控因素放前几列，空列留作误差估计；交互列=两列水平组合另算。"
+                     % (n_runs // (p * p)))
+        return "\n".join(lines)
+    if action == "fullfact":
+        levels = args.get("levels")
+        if not isinstance(levels, list) or not levels:
+            return "❌ fullfact 需要 levels（各因素水平数，如 [2, 2, 3]）"
+        try:
+            levels = [int(v) for v in levels]
+        except (TypeError, ValueError):
+            return "❌ levels 须为整数数组"
+        if any(v < 2 for v in levels) or len(levels) > 8:
+            return "❌ 每因素 ≥ 2 水平且因素 ≤ 8"
+        total = 1
+        for v in levels:
+            total *= v
+        if total > 1296:
+            return "❌ 全因子 %d 组合过多（上限 1296）——因素多时改用 ortho 正交表" % total
+        rows = []
+        def rec(i, cur):
+            if i == len(levels):
+                rows.append(tuple(cur))
+                return
+            for v in range(1, levels[i] + 1):
+                cur.append(v)
+                rec(i + 1, cur)
+                cur.pop()
+        rec(0, [])
+        return ("**全因子设计 %s**（%d 次运行）\n组合：%s\n（全部主效应与交互效应可估；"
+                "运行数随水平数指数增长）"
+                % (" × ".join(str(v) for v in levels), len(rows),
+                   "；".join("(%s)" % ",".join(map(str, r)) for r in rows)))
+    if action == "lhs":
+        n, dims, seed = int(args.get("samples", 20) or 20), int(args.get("dims", 3) or 3), \
+            int(args.get("seed", 42) or 42)
+        if not (2 <= n <= 500) or not (1 <= dims <= 10):
+            return "❌ samples 2-500，dims 1-10"
+        state = [seed & 0x7FFFFFFF or 1]
+        def rnd():
+            state[0] = (1103515245 * state[0] + 12345) % 2147483648
+            return state[0] / 2147483648.0
+        cols = []
+        for _ in range(dims):
+            perm = list(range(n))
+            for i in range(n - 1, 0, -1):
+                j = int(rnd() * (i + 1))
+                perm[i], perm[j] = perm[j], perm[i]
+            cols.append([(perm[i] + rnd()) / n for i in range(n)])
+        lines = ["**拉丁超立方抽样 LHS(n=%d, dims=%d, seed=%d)**（每维 [0,1) 均分 n 层、每层恰 1 点）"
+                 % (n, dims, seed),
+                 "\n| Run | %s |" % " | ".join("x%d" % (d + 1) for d in range(dims)),
+                 "|---|%s|" % ("---|" * dims)]
+        for i in range(n):
+            lines.append("| %d | %s |" % (i + 1, " | ".join(_fmt(cols[d][i]) for d in range(dims))))
+        lines.append("\n（把 [0,1) 线性映射到各参数区间；改 seed 得不同但同等均匀的方案）")
+        return "\n".join(lines)
+    return "❌ 未知 action：%s（支持 ortho / fullfact / lhs）" % action
+
+# ======================================================================
+# 10. LaTeX 写作生成（booktabs 三线表 / 图环境 / 公式环境）
+# ======================================================================
+def tool_tex(args):
+    action = str(args.get("action", "table")).lower()
+    if action == "table":
+        headers, rows = args.get("headers") or [], args.get("rows")
+        csv_path = args.get("csv_path")
+        if csv_path:
+            if not os.path.exists(csv_path):
+                return "❌ 文件不存在：%s" % csv_path
+            try:
+                with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                    text = f.read()
+                parsed = list(csv.reader(text.splitlines(),
+                                         delimiter=_sniff_delimiter(text[:2048])))
+                parsed = [r for r in parsed if any(c.strip() for c in r)]
+                if not parsed:
+                    return "❌ CSV 为空：%s" % csv_path
+                headers, rows = parsed[0], parsed[1:]
+            except Exception as exc:
+                return "❌ CSV 读取失败：%s" % exc
+        if not headers or not rows:
+            return "❌ table 需要 headers + rows（或给 csv_path 直读数据）"
+        align = args.get("align")
+        if not align:
+            def col_type(ci):
+                cells = [r[ci] if ci < len(r) and str(r[ci]).strip() else None for r in rows]
+                return "r" if all(c is not None and _parse_cell_float(c) is not None for c in cells) else "l"
+            align = "".join(col_type(i) for i in range(len(headers)))
+        caption, label = args.get("caption", ""), args.get("label", "")
+        truncated = False
+        if len(rows) > 40:
+            rows, truncated = rows[:40], True
+        out = ["\\begin{table}[htbp]", "\\centering"]
+        cap = "\\caption{%s}" % _tex_escape(caption) if caption else ""
+        if caption and label:
+            cap += "\\label{%s}" % label
+        if cap:
+            out.append(cap)
+        elif label:
+            out.append("\\label{%s}" % label)
+        out.append("\\begin{tabular}{%s}" % align)
+        out.append("\\toprule")
+        out.append(" & ".join(_tex_escape(str(h)) for h in headers) + " \\\\")
+        out.append("\\midrule")
+        for r in rows:
+            out.append(" & ".join(_tex_escape(str(r[i]) if i < len(r) else "")
+                                  for i in range(len(headers))) + " \\\\")
+        out.append("\\bottomrule")
+        out.append("\\end{tabular}")
+        out.append("\\end{table}")
+        note = ("\n（数据超过 40 行已截断展示，全量请分表或用长表 longtable）" if truncated else "")
+        return ("**LaTeX 三线表**（需导言区 \\usepackage{booktabs}）\n\n```latex\n%s\n```%s\n"
+                "（数值列已自动右对齐、文本列左对齐；可传 align 覆盖，如 \"lccr\"）"
+                % ("\n".join(out), note))
+    if action == "figure":
+        files = args.get("files") or []
+        if not files:
+            return "❌ figure 需要 files（图片路径数组，或 [{path, caption}] 子图）"
+        caption, label = args.get("caption", ""), args.get("label", "")
+        width = args.get("width", r"0.9\columnwidth")
+        norm = [(f["path"], f.get("caption", "")) if isinstance(f, dict) else (str(f), "")
+                for f in files]
+        out = ["\\begin{figure}[htbp]", "\\centering"]
+        if len(norm) == 1:
+            out.append("\\includegraphics[width=%s]{%s}" % (width, norm[0][0]))
+            cap = "\\caption{%s}" % _tex_escape(caption)
+            if label:
+                cap += "\\label{%s}" % label
+            out.append(cap)
+            pkg = ""
+        else:
+            subw = args.get("subwidth", r"0.48\textwidth")
+            for i, (p, cap_sub) in enumerate(norm, 1):
+                out.append("\\begin{subfigure}{%s}" % subw)
+                out.append("    \\centering")
+                out.append("    \\includegraphics[width=\\linewidth]{%s}" % p)
+                out.append("    \\caption{%s}" % _tex_escape(cap_sub))
+                out.append("\\end{subfigure}%s" % ("" if i == len(norm) else "\n"))
+            cap = "\\caption{%s}" % _tex_escape(caption)
+            if label:
+                cap += "\\label{%s}" % label
+            out.append(cap)
+            pkg = "（多图需 \\usepackage{subcaption}）"
+        out.append("\\end{figure}")
+        return "**LaTeX 图环境%s**\n\n```latex\n%s\n```" % (pkg, "\n".join(out))
+    if action == "equation":
+        expr = (args.get("latex") or args.get("expr") or "").strip()
+        if not expr:
+            return "❌ equation 需要 latex（公式体，不含 begin/end 环境）"
+        label = args.get("label", "")
+        out = ["\\begin{equation}", expr]
+        if label:
+            out.append("\\label{%s}" % label)
+        out.append("\\end{equation}")
+        hint = "（正文引用：\\eqref{%s}）" % label if label else "（不要编号用 equation*）"
+        return "```latex\n%s\n```\n%s" % ("\n".join(out), hint)
+    return "❌ 未知 action：%s（支持 table / figure / equation）" % action
+
+# ======================================================================
+# 11. BibTeX 库工作台（解析 / 体检 / 去重合并 / 排序）
+# ======================================================================
+_BIB_REQUIRED = {"article": ["author", "title", "journal", "year"],
+                 "inproceedings": ["author", "title", "booktitle", "year"],
+                 "incollection": ["author", "title", "booktitle", "year"],
+                 "book": ["author", "title", "publisher", "year"],
+                 "phdthesis": ["author", "title", "school", "year"],
+                 "mastersthesis": ["author", "title", "school", "year"],
+                 "techreport": ["author", "title", "institution", "year"]}
+
+_BIB_FIELD_ORDER = ["author", "title", "journal", "booktitle", "institution", "school",
+                    "publisher", "year", "volume", "number", "pages", "editor", "doi", "url", "note"]
+
+def _split_top_level(s):
+    """按顶层逗号切分（忽略 {} 内与引号内的逗号）。"""
+    parts, cur, depth, in_q = [], [], 0, False
+    for ch in s:
+        if depth == 0:
+            if ch == '"' and not in_q:
+                in_q = True
+            elif ch == '"' and in_q:
+                in_q = False
+            elif ch == "," and not in_q:
+                parts.append("".join(cur))
+                cur = []
+                continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        cur.append(ch)
+    tail = "".join(cur)
+    if tail.strip():
+        parts.append(tail)
+    return parts
+
+def _parse_bib_text(text):
+    """解析 BibTeX 文本 → [{type, key, fields}]。跳过 @comment/@string/@preamble。"""
+    entries, i, n = [], 0, len(text)
+    while True:
+        at = text.find("@", i)
+        if at < 0:
+            break
+        m = re.match(r"@(\w+)\s*\{", text[at:])
+        if not m or m.group(1).lower() in ("comment", "string", "preamble"):
+            i = at + 1
+            continue
+        typ, j = m.group(1).lower(), at + m.end()
+        km = re.match(r"\s*([^,\s{}]+)\s*,", text[j:])
+        if not km:
+            i = at + 1
+            continue
+        key, j = km.group(1), j + km.end()
+        depth, k = 1, j
+        while k < n and depth > 0:
+            if text[k] == "{":
+                depth += 1
+            elif text[k] == "}":
+                depth -= 1
+            k += 1
+        fields = {}
+        for part in _split_top_level(text[j:k - 1]):
+            fm = re.match(r"\s*(\w+)\s*=\s*(.*?)\s*$", part, re.DOTALL)
+            if fm:
+                name, val = fm.group(1).lower(), fm.group(2).strip()
+                if val.startswith("{") and val.endswith("}"):
+                    val = val[1:-1]
+                elif val.startswith('"') and val.endswith('"'):
+                    val = val[1:-1]
+                fields[name] = " ".join(val.split())
+        entries.append({"type": typ, "key": key, "fields": fields})
+        i = k
+    return entries
+
+def _bib_health(entries):
+    """库体检：缺失必填 / 重复 key / 重复 DOI / 重复标题 / DOI 格式。"""
+    issues, seen_keys, seen_dois, seen_titles = [], set(), {}, {}
+    for e in entries:
+        f = e["fields"]
+        req = _BIB_REQUIRED.get(e["type"])
+        if req is None:
+            issues.append("⚠ %s（%s）：类型少见，未按标准必填字段检查" % (e["key"], e["type"]))
+        else:
+            missing = [r for r in req if r not in f or not f[r].strip()]
+            if missing:
+                issues.append("⚠ %s（%s）：缺必填字段 %s" % (e["key"], e["type"], ", ".join(missing)))
+        if "title" in f and f["title"].strip():
+            nt = _norm_title(f["title"])
+            if nt and nt in seen_titles:
+                issues.append("⚠ 疑似重复条目：%s 与 %s（标题相同）" % (e["key"], seen_titles[nt]))
+            else:
+                seen_titles[nt] = e["key"]
+        if f.get("doi", "").strip():
+            d = _norm_doi(f["doi"])
+            if d in seen_dois:
+                issues.append("❌ 重复 DOI：%s 与 %s 均为 %s" % (e["key"], seen_dois[d], d))
+            else:
+                seen_dois[d] = e["key"]
+            if not re.match(r"^10\.\d{4,9}/\S+$", d):
+                issues.append("⚠ %s：DOI 格式可疑（应为 10.xxxx/后缀）" % e["key"])
+        else:
+            issues.append("ℹ %s：无 DOI（可用 labmate_cite 查真实元数据补全）" % e["key"])
+        if e["key"] in seen_keys:
+            issues.append("❌ 重复 key：%s（BibTeX 会报 Repeated entry）" % e["key"])
+        else:
+            seen_keys.add(e["key"])
+    return issues
+
+def _format_bib_entry(e):
+    f = e["fields"]
+    ordered = [k for k in _BIB_FIELD_ORDER if k in f] + \
+              [k for k in f if k not in _BIB_FIELD_ORDER]
+    body = ",\n".join("  %-12s = {%s}" % (k, f[k]) for k in ordered)
+    return "@%s{%s,\n%s\n}" % (e["type"], e["key"], body)
+
+def _bib_year(e):
+    m = re.search(r"\d{4}", e["fields"].get("year", ""))
+    return int(m.group(0)) if m else 0
+
+def tool_bibtex(args):
+    action = str(args.get("action", "check")).lower()
+    if action not in ("check", "merge", "sort"):
+        return "❌ 未知 action：%s（支持 check / merge / sort）" % action
+    paths = args.get("bib_paths") or ([args["bib_path"]] if args.get("bib_path") else [])
+    paths = [str(p) for p in paths if p]
+    if not paths:
+        return "❌ 需要 bib_path 或 bib_paths（一个或多个 .bib 文件）"
+    all_entries = []
+    for p in paths:
+        if not os.path.exists(p):
+            return "❌ 文件不存在：%s" % p
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            entries = _parse_bib_text(f.read())
+        if not entries:
+            return "❌ 未解析到 BibTeX 条目（检查 @type{key, 格式）：%s" % p
+        all_entries.extend((p, e) for e in entries)
+    if action == "check":
+        issues = _bib_health([e for _, e in all_entries])
+        lines = ["**BibTeX 库体检（%d 个条目）**\n" % len(all_entries)]
+        lines.extend("- " + s for s in issues) if issues else lines.append("✅ 未发现问题：必填字段齐全，key/DOI/标题无重复")
+        lines.append("\n（只查元数据完整性与重复；条目真伪用 labmate_cite 按 DOI 抽验）")
+        return "\n".join(lines)
+    merged, dropped = {}, []
+    for p, e in all_entries:
+        doi = _norm_doi(e["fields"].get("doi", "")) if e["fields"].get("doi") else ""
+        nt = _norm_title(e["fields"].get("title", ""))
+        dup_key = None
+        for k in merged:
+            if doi and _norm_doi(merged[k]["fields"].get("doi", "")) == doi:
+                dup_key = k
+                break
+        if dup_key is None and nt:
+            for k in merged:
+                if _norm_title(merged[k]["fields"].get("title", "")) == nt:
+                    dup_key = k
+                    break
+        if dup_key is not None:
+            for fld, val in e["fields"].items():
+                if fld not in merged[dup_key]["fields"] and val.strip():
+                    merged[dup_key]["fields"][fld] = val
+            dropped.append((e["key"], dup_key))
+        else:
+            if e["key"] in merged:
+                base, suf, idx = e["key"], "abcdefghijklmnopqrstuvwxyz", 0
+                while e["key"] in merged:
+                    e["key"] = base + suf[idx]
+                    idx += 1
+            merged[e["key"]] = e
+    entries = list(merged.values())
+    sort_key = str(args.get("sort", "year")).lower()
+    if sort_key == "year":
+        entries.sort(key=lambda e: -_bib_year(e))
+    elif sort_key == "author":
+        entries.sort(key=lambda e: e["fields"].get("author", "").lower())
+    elif sort_key == "key":
+        entries.sort(key=lambda e: e["key"].lower())
+    else:
+        return "❌ sort 支持 year（默认，新→旧）/ author / key"
+    header = "**BibTeX 合并**：%d 个文件 → %d 条（按 %s 排序）" % (len(paths), len(entries), sort_key)
+    if dropped:
+        header += "\n去重记录：" + "；".join("%s ≈ %s" % (a, b) for a, b in dropped)
+    out = "\n\n".join(_format_bib_entry(e) for e in entries)
+    return ("%s\n\n```bibtex\n%s\n```\n\n（重复条目已按 DOI/标题合并、字段互补；"
+            "写回文件让 AI 直接存盘即可）" % (header, out))
+
+# ======================================================================
+# 12. 信号与序列处理（移动平均 / Savitzky-Golay / 插值 / 数值积分）
+# ======================================================================
+def _solve_linear(M, b):
+    """带行主元的高斯消元解 Mx = b（小型稠密系统）。"""
+    n = len(M)
+    A = [row[:] + [bv] for row, bv in zip(M, b)]
+    for i in range(n):
+        piv = max(range(i, n), key=lambda r: abs(A[r][i]))
+        if abs(A[piv][i]) < 1e-12:
+            return None
+        A[i], A[piv] = A[piv], A[i]
+        for r in range(i + 1, n):
+            f = A[r][i] / A[i][i]
+            for c2 in range(i, n + 1):
+                A[r][c2] -= f * A[i][c2]
+    x = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        s = A[i][n] - sum(A[i][j] * x[j] for j in range(i + 1, n))
+        x[i] = s / A[i][i]
+    return x
+
+def _sg_coeffs(window, poly):
+    """Savitzky-Golay 平滑系数（deriv=0）：c = (AᵀA)⁻¹Aᵀ 第 0 行。"""
+    h = window // 2
+    offs = list(range(-h, h + 1))
+    m = poly + 1
+    At = [[float(o) ** p_ for o in offs] for p_ in range(m)]
+    AtA = [[sum(At[p_][j] * At[q][j] for j in range(window)) for q in range(m)] for p_ in range(m)]
+    z = _solve_linear(AtA, [1.0] + [0.0] * (m - 1))
+    if z is None:
+        return None
+    return [sum(z[p_] * At[p_][j] for p_ in range(m)) for j in range(window)]
+
+def tool_signal(args):
+    action = str(args.get("action", "smooth")).lower()
+    ys = [float(v) for v in (args.get("y") or [])]
+    if not ys:
+        return "❌ 需要 y 数组（等间距数据可不给 x）"
+    if action == "smooth":
+        method = str(args.get("method", "ma")).lower()
+        w = int(args.get("window", 5) or 5)
+        if w < 3 or w > len(ys) or w % 2 == 0:
+            return "❌ window 需为奇数且 3 ≤ window ≤ 数据长度（当前 %d 点）" % len(ys)
+        if method == "ma":
+            h = w // 2
+            out = []
+            for i in range(len(ys)):
+                seg = ys[max(0, i - h): i + h + 1]
+                out.append(sum(seg) / len(seg))
+            return ("**移动平均平滑（window=%d；端点收缩窗口，长度不变）**\n%s\n"
+                    "（简单去噪但会压低峰谷；要保峰形改用 method=savgol）"
+                    % (w, ", ".join(_fmt(v) for v in out)))
+        if method == "savgol":
+            poly = int(args.get("poly", 2) or 2)
+            if poly < 1 or poly >= w:
+                return "❌ poly 需满足 1 ≤ poly < window"
+            c = _sg_coeffs(w, poly)
+            if c is None:
+                return "❌ 系数求解失败（window/poly 组合退化）"
+            h = w // 2
+            out = list(ys)
+            for i in range(h, len(ys) - h):
+                out[i] = sum(c[j] * ys[i - h + j] for j in range(w))
+            return ("**Savitzky-Golay 平滑（window=%d, poly=%d；内部点卷积，两端保留原值）**\n%s\n"
+                    "（局部多项式拟合：保峰形与峰位，优于移动平均）"
+                    % (w, poly, ", ".join(_fmt(v) for v in out)))
+        return "❌ method 支持 ma（移动平均）/ savgol"
+    if action == "interp":
+        xs = [float(v) for v in (args.get("x") or [])]
+        targets = [float(v) for v in (args.get("targets") or [])]
+        if not xs or len(xs) != len(ys) or not targets:
+            return "❌ interp 需要 x（与 y 等长）与 targets"
+        pts = sorted(zip(xs, ys))
+        if any(pts[i][0] == pts[i - 1][0] for i in range(1, len(pts))):
+            return "❌ x 存在重复值"
+        out = []
+        for t in targets:
+            if t < pts[0][0] or t > pts[-1][0]:
+                return "❌ target %s 超出数据范围 [%s, %s]（本工具不做外推）" % (
+                    _fmt(t), _fmt(pts[0][0]), _fmt(pts[-1][0]))
+            j = bisect.bisect_right(pts, (t, float("inf")))
+            j = min(max(j, 1), len(pts) - 1)
+            x0, y0, x1, y1 = pts[j - 1][0], pts[j - 1][1], pts[j][0], pts[j][1]
+            out.append(y0 if x1 == x0 else y0 + (y1 - y0) * (t - x0) / (x1 - x0))
+        return "**线性插值**\n" + ", ".join("%s → %s" % (_fmt(t), _fmt(v))
+                                        for t, v in zip(targets, out))
+    if action == "integrate":
+        xs = [float(v) for v in (args.get("x") or [])]
+        method = str(args.get("method", "trapezoid")).lower()
+        if len(xs) < 2 or len(xs) != len(ys):
+            return "❌ integrate 需要 x、y 等长且 ≥ 2 点"
+        pts = sorted(zip(xs, ys))
+        px, py = [p[0] for p in pts], [p[1] for p in pts]
+        if any(px[i] == px[i - 1] for i in range(1, len(px))):
+            return "❌ x 存在重复值"
+        if method == "trapezoid":
+            area = sum((px[i + 1] - px[i]) * (py[i] + py[i + 1]) / 2 for i in range(len(px) - 1))
+            return "**梯形法数值积分（%d 段）= %s**\n（曲线弯曲剧烈时加密采样或改用 simpson）" % (
+                len(px) - 1, _fmt(area))
+        if method == "simpson":
+            if (len(px) - 1) % 2 == 1:
+                return "❌ Simpson 需偶数段（奇数个点）：当前 %d 点，截掉或补 1 点" % len(px)
+            h = (px[-1] - px[0]) / (len(px) - 1)
+            if any(abs(px[i + 1] - px[i] - h) > 1e-9 * max(abs(h), 1.0)
+                   for i in range(len(px) - 1)):
+                return "❌ Simpson 需等距采样（先用 resample 均匀化）"
+            area = h / 3 * (py[0] + py[-1] + 4 * sum(py[1:-1:2]) + 2 * sum(py[2:-2:2]))
+            return "**Simpson 数值积分（%d 段等距）= %s**\n（二次/三次曲线可达机器精度）" % (
+                len(px) - 1, _fmt(area))
+        return "❌ method 支持 trapezoid（默认）/ simpson"
+    if action == "resample":
+        xs = [float(v) for v in (args.get("x") or [])]
+        n = int(args.get("n", 100) or 100)
+        if len(xs) < 2 or len(xs) != len(ys):
+            return "❌ resample 需要 x、y 等长且 ≥ 2 点"
+        if not (2 <= n <= 10000):
+            return "❌ n 取值 2-10000"
+        pts = sorted(zip(xs, ys))
+        px, py = [p[0] for p in pts], [p[1] for p in pts]
+        if px[0] == px[-1]:
+            return "❌ x 无范围"
+        step = (px[-1] - px[0]) / (n - 1)
+        out = []
+        for i in range(n):
+            t = px[0] + i * step
+            j = min(max(bisect.bisect_right(px, t), 1), len(px) - 1)
+            x0, y0, x1, y1 = px[j - 1], py[j - 1], px[j], py[j]
+            out.append(y0 if x1 == x0 else y0 + (y1 - y0) * (t - x0) / (x1 - x0))
+        shown = ", ".join(_fmt(v) for v in out[:50]) + ("…" if n > 50 else "")
+        return "**重采样 %d 点（线性插值，范围 [%s, %s]）**\n%s" % (n, _fmt(px[0]), _fmt(px[-1]), shown)
+    return "❌ 未知 action：%s（支持 smooth / interp / integrate / resample）" % action
+
+# ======================================================================
 # MCP 协议层（newline-delimited JSON-RPC 2.0）
 # ======================================================================
 TOOLS = [
@@ -1242,6 +2286,79 @@ TOOLS = [
          "context": {"type": "integer", "description": "命中上下文半径字符数，默认 80"},
          "max_mb": {"type": "number", "description": "文件大小上限 MB，默认 50"}},
      "required": ["pdf_path"]}},
+    {"name": "labmate_stats",
+     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power"},
+         "data": {"type": "array", "description": "describe/normality/ci 的样本数组"},
+         "a": {"type": "array", "description": "ttest 第一组"},
+         "b": {"type": "array", "description": "ttest 第二组；不给则对 a 做 mu 单样本检验"},
+         "mu": {"type": "number", "description": "单样本假设均值，默认 0"},
+         "paired": {"type": "boolean", "description": "配对设计（a、b 等长）"},
+         "equal_var": {"type": "boolean", "description": "两样本方差齐性假设（默认 false= Welch）"},
+         "groups": {"type": "array", "description": "anova：≥2 组数值数组"},
+         "alpha": {"type": "number", "description": "显著性水平，默认 0.05"},
+         "confidence": {"type": "number", "description": "ci 置信水平，默认 0.95"},
+         "delta": {"type": "number", "description": "power：要检出的均值差"},
+         "sd": {"type": "number", "description": "power：合并标准差"},
+         "power": {"type": "number", "description": "power：目标功效，默认 0.8"}},
+     "required": ["action"]}},
+    {"name": "labmate_errors",
+     "description": "不确定度分析（GUM）：propagate 一阶合成不确定度（公式+各分量贡献+k=2 扩展）/ regress OLS 斜率截距 95% 置信区间。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "propagate（默认）| regress"},
+         "formula": {"type": "string", "description": "propagate：y=f(x1,x2,..) 算术表达式"},
+         "vars": {"type": "object", "description": "propagate：{符号: 数值}"},
+         "uncertainties": {"type": "object", "description": "propagate：{符号: u(符号)}"},
+         "x": {"type": "array", "description": "regress 自变量"},
+         "y": {"type": "array", "description": "regress 因变量"}},
+     "required": ["action"]}},
+    {"name": "labmate_doe",
+     "description": "实验设计（零依赖）：ortho 素数域生成正交表（L4/L8/L16/L32/L9/L27/L25，正交性有数学保证）/ fullfact 全因子组合 / lhs 拉丁超立方抽样（每维分层、改 seed 换方案）。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "ortho（默认）| fullfact | lhs"},
+         "runs": {"type": "string", "description": "ortho：L8 这类标准表名"},
+         "p": {"type": "integer", "description": "ortho：素数水平 2/3/5/7"},
+         "factors": {"type": "integer", "description": "ortho：基本列数（p^factors=运行数）"},
+         "max_factors": {"type": "integer", "description": "ortho：输出列数上限"},
+         "levels": {"type": "array", "description": "fullfact：各因素水平数如 [2,2,3]"},
+         "samples": {"type": "integer", "description": "lhs：样本数，默认 20"},
+         "dims": {"type": "integer", "description": "lhs：维度，默认 3"},
+         "seed": {"type": "integer", "description": "lhs：随机种子，默认 42"}},
+     "required": ["action"]}},
+    {"name": "labmate_tex",
+     "description": "LaTeX 写作生成：table booktabs 三线表（支持 csv_path 直读，数值列自动右对齐，>40 行截断提示）/ figure 图环境（多图自动 subfigure）/ equation 带编号公式（\\eqref 引用）。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "table（默认）| figure | equation"},
+         "headers": {"type": "array", "description": "table 表头"},
+         "rows": {"type": "array", "description": "table 数据行"},
+         "csv_path": {"type": "string", "description": "table：直读本机 CSV（首行表头）"},
+         "align": {"type": "string", "description": "table：列对齐如 lccr（默认数值右对齐）"},
+         "caption": {"type": "string"}, "label": {"type": "string"},
+         "files": {"type": "array", "description": "figure：图片路径数组，或 [{path, caption}] 子图"},
+         "width": {"type": "string", "description": "figure：默认 0.9\\columnwidth"},
+         "subwidth": {"type": "string", "description": "figure：子图宽，默认 0.48\\textwidth"},
+         "latex": {"type": "string", "description": "equation：公式体（不含 begin/end）"}},
+     "required": ["action"]}},
+    {"name": "labmate_bibtex",
+     "description": "BibTeX 库工作台：check 元数据体检（必填字段/重复 key/DOI/标题）/ merge 跨库去重合并（DOI 优先、标题兜底）/ sort 按作者-年份排序规范化输出。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "check（默认）| merge | sort"},
+         "bib_path": {"type": "string", "description": "单个 .bib 文件路径"},
+         "bib_paths": {"type": "array", "description": "多个 .bib 文件（merge 跨库合并）"}},
+     "required": ["action"]}},
+    {"name": "labmate_signal",
+     "description": "试验曲线信号处理（零依赖）：smooth 移动平均 / Savitzky-Golay 保峰形平滑、interp 线性插值（不外推）、integrate 梯形 / Simpson 数值积分、resample 均匀重采样。",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "description": "smooth（默认）| interp | integrate | resample"},
+         "y": {"type": "array", "description": "因变量数组"},
+         "x": {"type": "array", "description": "自变量（smooth 可省略视为等间距）"},
+         "window": {"type": "integer", "description": "smooth：窗口（奇数），默认 5"},
+         "method": {"type": "string", "description": "smooth：ma|savgol；integrate：trapezoid（默认）|simpson"},
+         "poly": {"type": "integer", "description": "savgol：多项式阶数，默认 2"},
+         "targets": {"type": "array", "description": "interp：目标 x 值"},
+         "n": {"type": "integer", "description": "resample：目标点数，默认 100"}},
+     "required": ["y"]}},
 ]
 
 _DISPATCH = {
@@ -1256,6 +2373,12 @@ _DISPATCH = {
     "labmate_cite": tool_cite,
     "labmate_search": tool_search,
     "labmate_pdf": tool_pdf,
+    "labmate_stats": tool_stats,
+    "labmate_errors": tool_errors,
+    "labmate_doe": tool_doe,
+    "labmate_tex": tool_tex,
+    "labmate_bibtex": tool_bibtex,
+    "labmate_signal": tool_signal,
 }
 
 def handle(msg):
