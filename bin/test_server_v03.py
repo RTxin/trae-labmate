@@ -238,7 +238,7 @@ os.remove(bad_file); os.remove(enc_file)
 ok("缺 path 拦截", "❌" in srv.tool_pdf({}), "")
 
 # ======================================================================
-print("== 17. stdio 冒烟（0.4.0 · 17 工具）==")
+print("== 17. stdio 冒烟（0.4.1 · 17 工具）==")
 def rpc(msgs):
     p = subprocess.run([sys.executable, os.path.join(HERE, "labmate_server.py")],
                        input="\n".join(msgs) + "\n", capture_output=True,
@@ -250,7 +250,7 @@ out = rpc([
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_handcalc","arguments":{"vars":{"b":0.1,"h_s":0.025},"steps":[{"symbol":"A_s","formula":"b*h_s"}],"fmt":"latex"}}}',
 ])
-ok("版本 0.4.0", out[0]["result"]["serverInfo"]["version"] == "0.4.0",
+ok("版本 0.4.1", out[0]["result"]["serverInfo"]["version"] == "0.4.1",
    out[0]["result"]["serverInfo"])
 names = [t["name"] for t in out[1]["result"]["tools"]]
 ok("tools/list = 17", len(names) == 17, names)

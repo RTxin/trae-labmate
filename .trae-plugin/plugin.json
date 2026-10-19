@@ -1,7 +1,7 @@
 {
   "name": "labmate",
-  "version": "0.4.0",
-  "description": "科研搭子：面向力学及物理科学研究者的 Trae 助手——十七件套 MCP 引擎（单位换算/手算排版+LaTeX/Mohr圆/拟合/数据体检/期刊样式/统计推断/不确定度/实验设计/LaTeX写作/BibTeX工作台/信号处理/arXiv/DOI引用/多源文献聚合/本地PDF溯源/科学栈体检）+ 15 个科研引导 skills。零第三方依赖，数据不出本机。",
+  "version": "0.4.1",
+  "description": "科研搭子：面向力学及物理科学研究者的 Trae 助手——十七件套 MCP 引擎（单位换算/手算排版+LaTeX/Mohr圆/拟合/CSV与Excel数据体检/期刊样式/统计推断/不确定度/实验设计/LaTeX写作/BibTeX工作台/信号处理/arXiv/DOI引用/多源文献聚合/本地PDF溯源/科学栈体检）+ 15 个科研引导 skills。零第三方依赖，数据不出本机。",
   "author": {
     "name": "1024Builder"
   },
@@ -36,8 +36,8 @@
       "zh-cn": "科研搭子"
     },
     "description": {
-      "en": "A research companion for mechanics & physics researchers: eliciting unspoken expert assumptions, plus a 17-tool zero-dependency engine (units, handcalcs+LaTeX, Mohr circle, fitting, CSV profiling, journal styles, exact-p-value statistics, GUM uncertainty, DOE orthogonal arrays, LaTeX tables/figures, BibTeX library workbench, signal processing, arXiv/Crossref/OpenAlex federated search, local PDF grounding, DOI citations) and 15 guided research skills.",
-      "zh-cn": "面向力学/物理科研工作者的研究搭档：先把你没说出口的参数问出来（试验引导协议），再用十七件套零依赖工具接住计算、统计与写作——单位换算、教科书式手算（含 LaTeX）、数据拟合、本机数据体检、期刊样式、精确 p 值统计推断、GUM 不确定度、正交实验设计、LaTeX 三线表/图环境、BibTeX 库管理、试验曲线信号处理、多源文献聚合、本地 PDF 页码溯源、真实 DOI 引用。模块化架构，新领域按模板即插即用。"
+      "en": "A research companion for mechanics & physics researchers: eliciting unspoken expert assumptions, plus a 17-tool zero-dependency engine (units, handcalcs+LaTeX, Mohr circle, fitting, CSV/Excel data profiling, journal styles, exact-p-value statistics, GUM uncertainty, DOE orthogonal arrays, LaTeX tables/figures, BibTeX library workbench, signal processing, arXiv/Crossref/OpenAlex federated search, local PDF grounding, DOI citations) and 15 guided research skills.",
+      "zh-cn": "面向力学/物理科研工作者的研究搭档：先把你没说出口的参数问出来（试验引导协议），再用十七件套零依赖工具接住计算、统计与写作——单位换算、教科书式手算（含 LaTeX）、数据拟合、本机数据体检（CSV 与 Excel 直读）、期刊样式、精确 p 值统计推断、GUM 不确定度、正交实验设计、LaTeX 三线表/图环境、BibTeX 库管理、试验曲线信号处理、多源文献聚合、本地 PDF 页码溯源、真实 DOI 引用。模块化架构，新领域按模板即插即用。"
     }
   },
   "interface": {

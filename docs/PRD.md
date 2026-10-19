@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.0（P1/P2 全量落地 + P3 需求复核六工具补齐） |
+| 版本 | 0.4.1（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口） |
 | 日期 | 2026-10-19 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0，17 工具/15 skills） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1，17 工具/15 skills） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -140,6 +140,24 @@
 8. Savitzky-Golay 系数矩阵行变量名错误（NameError，同上当场抓获）
 
 验收：四套单测 194 项全绿（v04 新增 86 项已知值对表验证：χ²=3.84→p=0.05、F(3,12)临界值、√2 单样本 t、Simpson x³ 精确积分、L8 正交性穷举、LHS 分层性等）。
+
+### P4（0.4.1 · 数据入口补强：Excel 直读）
+
+**复核结论**：调研 2.2 已指出"试验数据滞留本地仪器文件夹，**Excel 中心工作流**的转录错误与溯源断裂"（Bassetti）——但 0.4.0 的 `labmate_table` 只吃 CSV，而科研试验数据的一大半躺在 .xlsx 里。数据进不来，table→stats→fit→plot 整条链路都白搭。这是"用户数据进不来"的硬卡点，优先级高于一切新分析功能。
+
+**方案**：不新增工具，`labmate_table` 增加 `xlsx_path` + `sheet` 参数；内部新增 `_read_xlsx` 产出 `(header, rows)` 后**完全复用既有统计链路**（`_table_summary`/`_parse_cell_float`）。坚持零依赖（zipfile + ElementTree 手工解析 OOXML，与 PDF 的 zlib 方案同思路），不引入 openpyxl。
+
+**ECMA-376 已知坑位全处理**（每条都有 fixture 断言守护）：
+| # | 坑位 | 处理 |
+|---|---|---|
+| ① | 空单元格在 XML 中直接缺失 → 列错位 | 按 `<c r="B3">` 列字母定位，稀疏行补空字符串 |
+| ② | t="s" 共享字符串 | 查 sharedStrings.xml，富文本 `<r><t>` 段落拼接（跳过注音 rPh） |
+| ③ | 字符串形态分叉 | inlineStr 读 `<is><t>`；布尔 t="b" 转 TRUE/FALSE；公式文本 t="str" 直取 |
+| ④ | 日期是序列号 + styles.xml 数字格式 | 内置 numFmtId 14-22/45-47 + 自定义 formatCode 判定；1900 系统伪闰年分两段起点（serial≥61 用 1899-12-30），转 ISO 文本 |
+| ⑤ | 第一个 sheet 文件名不保证 sheet1.xml | 解析 workbook.xml + rels 的 rId→target 映射 |
+| ⑥ | 数值科学计数 `1.5E-3` 被当文本 | `_parse_cell_float` 增加科学计数分支（CSV 同样受益） |
+
+**验收**：五套单测 234 项全绿（v05 新增 40 项：fixture 用 zipfile 现场构造标准 xlsx——双工作表、第一个 sheet 故意命名 zz9.xml、稀疏空位、富文本、三种日期样式、科学计数；坏文件边界覆盖老式 .xls 引导另存、纯文本伪装、缺 workbook.xml、只有表头；CSV 老路径全回归）。
 
 ---
 

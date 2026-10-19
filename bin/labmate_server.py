@@ -8,7 +8,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.0 · 十七件套）：
+工具（0.4.1 · 十七件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
@@ -21,7 +21,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   labmate_doe       正交表(L4~L32/L9/L27/L25，素数域生成) / 全因子 / 拉丁超立方
   labmate_signal    移动平均与 Savitzky-Golay 平滑 / 线性插值 / 梯形与 Simpson 积分 / 重采样
   数据组（零依赖，只读本机）：
-  labmate_table    本机试验数据体检：CSV 读取 + 列统计摘要（csv 模块，零依赖）
+  labmate_table    本机试验数据体检：CSV / Excel(.xlsx) 读取 + 列统计摘要（零依赖，xlsx 走 zipfile+XML）
   labmate_style    期刊绘图样式注入：ieee/nature/science/中文期刊（SciencePlots 逆向）
   labmate_deps     科学栈体检（探测 numpy/scipy/lmfit/sympy/matplotlib/pyvista）
   写作组（零依赖）：
@@ -42,6 +42,7 @@ import ast
 import bisect
 import concurrent.futures
 import csv
+import datetime
 import difflib
 import io
 import json
@@ -53,10 +54,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.4.1"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -441,9 +443,10 @@ def _sniff_delimiter(sample):
 
 _THOUS_RE = re.compile(r"\d{1,3}(,\d{3})+(\.\d+)?$")
 _EURO_RE = re.compile(r"\d+,\d{1,2}$")
+_SCI_RE = re.compile(r"\d+(\.\d+)?[eE][+-]?\d+")
 
 def _parse_cell_float(s):
-    """单元格 → float：识别美式千分位（1,234.5）与欧式小数（1234,5）。
+    """单元格 → float：识别美式千分位（1,234.5）、欧式小数（1234,5）与科学计数（1.5E-3）。
     "1,234" 按千分位（1234）而非欧式（1.234）处理——两者歧义时取更常见的。
     返回 None 表示非数值。"""
     s = str(s).strip()
@@ -454,6 +457,8 @@ def _parse_cell_float(s):
     v = None
     if _THOUS_RE.fullmatch(core) or re.fullmatch(r"\d+(\.\d+)?", core):
         v = float(core.replace(",", ""))
+    elif _SCI_RE.fullmatch(core):
+        v = float(core)
     elif _EURO_RE.fullmatch(core):
         v = float(core.replace(",", "."))
     if v is None:
@@ -495,8 +500,249 @@ def _table_summary(rows, header):
     lines.append("\n提示：列类型可作为后续处理依据；数值列可接 labmate_fit_lite 拟合或交给绘图脚本。")
     return "\n".join(lines)
 
+# ----------------------------------------------------------------------
+# 4.5a Excel(.xlsx) 零依赖读取（zipfile + ElementTree，按 ECMA-376 解析）
+# ----------------------------------------------------------------------
+# 与 PDF 同思路：不引入 openpyxl，手工解析 OOXML 容器。已知坑位全部处理：
+#   ① 空单元格在 XML 中直接缺失——按 <c r="B3"> 的列字母定位补空位，防列错位
+#   ② t="s" 共享字符串查 sharedStrings.xml（含富文本 <r><t> 段落拼接，跳过注音 rPh）
+#   ③ t="inlineStr" 读 <is><t>；t="b" 布尔转 TRUE/FALSE；t="str" 公式文本直取
+#   ④ 日期是序列号 + styles.xml 数字格式（内置 14-22/45-47 + 自定义看 formatCode），
+#      1900 系统起点分两段处理伪闰年（serial≥61 用 1899-12-30，1-59 用 1899-12-31）
+#   ⑤ 第一个工作表文件名不保证是 sheet1.xml——查 workbook.xml + rels 的 rId→target
+_XL_RID_KEY = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+_XL_BUILTIN_DATE_FMTS = set(range(14, 23)) | {45, 46, 47}
+
+def _xl_local(tag):
+    """剥离 XML 命名空间：'{http://…main}c' → 'c'。"""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+def _xlsx_col_index(letters):
+    """列字母 → 0-based 序号：'A'→0，'Z'→25，'AA'→26。"""
+    n = 0
+    for ch in letters.upper():
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+def _xlsx_text_under(el):
+    """递归拼接 el 子树内所有 <t> 文本（覆盖 <t> 直存与富文本 <r><t>，跳过注音 <rPh>）。"""
+    parts = []
+    for child in el:
+        ln = _xl_local(child.tag)
+        if ln == "rPh":
+            continue
+        if ln == "t":
+            parts.append(child.text or "")
+        else:
+            parts.append(_xlsx_text_under(child))
+    return "".join(parts)
+
+def _xlsx_fmt_is_date(fmt):
+    """formatCode 是否日期/时间格式：去掉 [方括号块] 与 \"引号文本\" 后含 y/m/d/h/s。"""
+    fmt = re.sub(r"\[[^\]]*\]", "", fmt or "")
+    fmt = re.sub(r'"[^"]*"', "", fmt)
+    fmt = fmt.replace("AM/PM", "").replace("A/P", "")
+    return bool(re.search(r"[ymdhs]", fmt, re.IGNORECASE))
+
+def _xlsx_date_styles(styles_bytes):
+    """解析 styles.xml → cellXfs 索引表 [是否日期]。缺文件/无 cellXfs 返回 []。"""
+    try:
+        root = ET.fromstring(styles_bytes)
+    except Exception:
+        return []
+    custom = {}
+    for el in root.iter():
+        if _xl_local(el.tag) == "numFmt":
+            fid = el.get("numFmtId")
+            if fid is not None:
+                custom[fid] = _xlsx_fmt_is_date(el.get("formatCode"))
+    xfs = []
+    for el in root.iter():
+        if _xl_local(el.tag) == "cellXfs":
+            for xf in el:
+                if _xl_local(xf.tag) != "xf":
+                    continue
+                fid = xf.get("numFmtId") or "0"
+                if fid in custom:
+                    xfs.append(custom[fid])
+                elif fid.isdigit():
+                    xfs.append(int(fid) in _XL_BUILTIN_DATE_FMTS)
+                else:
+                    xfs.append(False)
+    return xfs
+
+def _xlsx_is_date_cell(s_attr, date_xfs):
+    """单元格样式索引是否指向日期格式。"""
+    if s_attr is None or not date_xfs:
+        return False
+    try:
+        return date_xfs[int(s_attr)]
+    except (ValueError, IndexError):
+        return False
+
+def _xlsx_serial_date(serial):
+    """Excel 1900 系统序列号 → 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM[:SS]'。
+    serial≥61 起点 1899-12-30（吸收 1900 伪闰日），1-59 起点 1899-12-31；小数部分是时间。"""
+    days = int(serial)
+    frac = serial - days
+    if days >= 61:
+        d = datetime.date(1899, 12, 30) + datetime.timedelta(days=days)
+    elif days >= 1:
+        d = datetime.date(1899, 12, 31) + datetime.timedelta(days=days)
+    else:
+        d = datetime.date(1899, 12, 31)  # serial<1：仅时间（挂 1899-12-31），现实数据罕见
+    if frac >= 1e-9:
+        secs = int(round(frac * 86400))
+        if secs % 60:
+            return "%s %02d:%02d:%02d" % (d.isoformat(), secs // 3600, secs % 3600 // 60, secs % 60)
+        return "%s %02d:%02d" % (d.isoformat(), secs // 3600, secs % 3600 // 60)
+    return d.isoformat()
+
+def _xlsx_shared_strings(zf):
+    """读 xl/sharedStrings.xml → 共享字符串列表（富文本已拼接）。缺文件返回 None。"""
+    try:
+        data = zf.read("xl/sharedStrings.xml")
+    except KeyError:
+        return None
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return []
+    out = []
+    for si in root:
+        if _xl_local(si.tag) == "si":
+            out.append(_xlsx_text_under(si))
+    return out
+
+def _read_xlsx(path, sheet=None):
+    """零依赖解析 .xlsx 的工作表 → (header, rows, 来源描述)，失败返回错误字符串。
+    第一行按表头（与 CSV 一致）；空单元格补空字符串；日期列转 ISO 文本。"""
+    if not os.path.isfile(path):
+        return "❌ 文件不存在：%s（检查路径；.xlsx 支持中文文件名）" % path
+    try:
+        zf = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        return "❌ 不是有效的 .xlsx（zip 容器损坏；老式 .xls 二进制不支持，请在 Excel/WPS 里另存为 .xlsx）"
+    with zf:
+        # 1) workbook.xml：工作表清单（文档顺序 = 显示顺序）
+        try:
+            wb = ET.fromstring(zf.read("xl/workbook.xml"))
+        except KeyError:
+            return "❌ 缺少 xl/workbook.xml：不是标准 .xlsx 结构"
+        except ET.ParseError as exc:
+            return "❌ workbook.xml 解析失败：%s" % exc
+        sheets = [el for el in wb.iter() if _xl_local(el.tag) == "sheet"]
+        if not sheets:
+            return "❌ 工作簿中没有工作表"
+        # 2) 选择工作表：名称或 1-based 序号，默认第 1 个
+        idx = 0
+        if sheet is not None:
+            names = [s.get("name") or "" for s in sheets]
+            if str(sheet) in names:
+                idx = names.index(str(sheet))
+            elif str(sheet).isdigit():
+                idx = int(sheet) - 1
+            else:
+                return "❌ 找不到工作表 %r；现有：%s" % (sheet, "、".join("『%s』" % n for n in names))
+        if not 0 <= idx < len(sheets):
+            return "❌ 工作表序号越界：共 %d 个（1-%d）" % (len(sheets), len(sheets))
+        target_el = sheets[idx]
+        rid = target_el.get(_XL_RID_KEY)
+        if rid is None:  # 兜底：有些生成器用别名前缀（URI 相同则 ET 已归一）
+            for k, v in target_el.attrib.items():
+                if k.endswith("}id") or k == "id":
+                    rid = v
+                    break
+        # 3) rels：rId → 工作表 XML 路径
+        try:
+            rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+        except KeyError:
+            return "❌ 缺少 xl/_rels/workbook.xml.rels：无法定位工作表文件"
+        spath = None
+        for rel in rels:
+            if _xl_local(rel.tag) == "Relationship" and rel.get("Id") == rid:
+                t = rel.get("Target") or ""
+                spath = t[1:] if t.startswith("/") else (t if t.startswith("xl/") else "xl/" + t)
+                break
+        if not spath:
+            return "❌ 关系 rId=%s 在 rels 中找不到（非标准 xlsx）" % rid
+        try:
+            sheet_xml = zf.read(spath)
+        except KeyError:
+            return "❌ 工作表文件 %s 缺失（非标准 xlsx）" % spath
+        # 4) 共享字符串与日期样式（均可缺失）
+        shared = _xlsx_shared_strings(zf)
+        try:
+            date_xfs = _xlsx_date_styles(zf.read("xl/styles.xml"))
+        except KeyError:
+            date_xfs = []
+        # 5) 逐行解析：按 r 属性列字母定位，空位补 ""
+        try:
+            root = ET.fromstring(sheet_xml)
+        except ET.ParseError as exc:
+            return "❌ 工作表 XML 解析失败：%s" % exc
+        all_rows = []
+        for row_el in root.iter():
+            if _xl_local(row_el.tag) != "row":
+                continue
+            cells, maxc = {}, -1
+            for c in row_el:
+                if _xl_local(c.tag) != "c":
+                    continue
+                m = re.match(r"([A-Za-z]+)", c.get("r") or "")
+                ci = _xlsx_col_index(m.group(1)) if m else len(cells)
+                tattr = c.get("t")
+                if tattr == "inlineStr":
+                    val = ""
+                    for sub in c:
+                        if _xl_local(sub.tag) == "is":
+                            val = _xlsx_text_under(sub)
+                            break
+                else:
+                    raw = ""
+                    for sub in c:
+                        if _xl_local(sub.tag) == "v":
+                            raw = sub.text or ""
+                            break
+                    if tattr == "s":
+                        try:
+                            val = shared[int(raw)] if shared else ""
+                        except (ValueError, IndexError):
+                            val = raw
+                    elif tattr == "b":
+                        val = "TRUE" if raw.strip() == "1" else "FALSE"
+                    elif tattr in (None, "n") and raw and _xlsx_is_date_cell(c.get("s"), date_xfs):
+                        try:
+                            val = _xlsx_serial_date(float(raw))
+                        except ValueError:
+                            val = raw
+                    else:  # "str" 公式文本 / "e" 错误码 / 普通数值
+                        val = raw
+                cells[ci] = val
+                if ci > maxc:
+                    maxc = ci
+            if cells:
+                all_rows.append([cells.get(i, "") for i in range(maxc + 1)])
+        if not all_rows:
+            return "❌ 工作表『%s』没有任何数据" % (target_el.get("name") or "")
+        header, rows = all_rows[0], all_rows[1:]
+        if not rows:
+            return "❌ 数据不足：『%s』只有表头一行，至少需要 1 行数据" % (target_el.get("name") or "")
+        origin = "Excel 工作簿『%s』第 %d/%d 个工作表『%s』（日期列已转 ISO 文本）" % (
+            os.path.basename(path), idx + 1, len(sheets), target_el.get("name") or "")
+        return header, rows, origin
+
 def tool_table(args):
-    """读取本机 CSV 或内联数据，输出列级统计体检。只读不写，数据不出本机。"""
+    """读取本机 CSV / Excel(.xlsx) 或内联数据，输出列级统计体检。只读不写，数据不出本机。"""
+    xlsx_path = args.get("xlsx_path")
+    if xlsx_path:
+        res = _read_xlsx(xlsx_path, args.get("sheet"))
+        if isinstance(res, str):
+            return res
+        header, rows, origin = res
+        out = _table_summary(rows, header)
+        preview = "\n".join(",".join(r) for r in ([header] + rows)[:4])
+        return out + "\n\n前几行预览（来源：%s）：\n```\n%s\n```" % (origin, preview)
     path = args.get("csv_path")
     data = args.get("data")
     text = None
@@ -2241,9 +2487,11 @@ TOOLS = [
      "description": "科学栈体检：探测 numpy/scipy/lmfit/sympy/matplotlib 等是否可用，给出缺失项与安装命令。",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "labmate_table",
-     "description": "本机试验数据体检：读取 CSV 文件或内联数据，自动探测分隔符，输出每列统计摘要（数值列均值/标准差/极值/缺失，文本列唯一值）。只读不写，数据不出本机。",
+     "description": "本机试验数据体检：读取 CSV / Excel(.xlsx) 文件或内联数据，自动探测分隔符，输出每列统计摘要（数值列均值/标准差/极值/缺失，文本列唯一值）。xlsx 零依赖解析（多工作表/日期/稀疏空位）。只读不写，数据不出本机。",
      "inputSchema": {"type": "object", "properties": {
          "csv_path": {"type": "string", "description": "本机 CSV 文件路径（推荐，支持 utf-8/GBK-BOM）"},
+         "xlsx_path": {"type": "string", "description": "本机 Excel(.xlsx) 文件路径（零依赖解析；老式 .xls 请先另存为 .xlsx）"},
+         "sheet": {"type": "string", "description": "xlsx 工作表：名称或 1-based 序号，默认第 1 个"},
          "data": {"type": "string", "description": "内联 CSV 文本（无文件时）"},
          "delimiter": {"type": "string", "description": "分隔符（默认自动探测）"}},
      }},
