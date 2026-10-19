@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.4（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与 Weibull 强度） |
-| 日期 | 2026-10-19 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具） |
+| 版本 | 0.4.5（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域） |
+| 日期 | 2026-10-20 |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -198,13 +198,26 @@
 
 ---
 
+### P8（0.4.5 · 振动测试标准动作：FFT 频谱与固有频率，仍 19 工具，skills 15→16）
+
+**复核结论**：P2 曾记录「振动领域模块按需复制 TEMPLATE」，本轮触发条件成熟：力学/机械试验的振动测试（锤击法、加速度时程、自由衰减）需要频域分析，而 0.4.4 前的 labmate_signal 只有时域动作（平滑/插值/积分/重采样）——**FFT 是信号处理的最后一块标准拼图**。没有它，"采样率怎么定、固有频率是多少、混叠了没有"这三个振动测试最常见的问题无法在本机闭环，用户只能把数据拖去 MATLAB。0.4.5 不新增工具，`labmate_signal` 加 action=spectrum；同时按 TEMPLATE 复制 `labmate-vibration` 领域模块，承接"领域专家默认知道但通用 AI 常缺"的振动专业常识（采样定理 2.56× 工程系数、Δf=1/T 是时长问题、混叠不可逆、半功率带宽阻尼）。
+
+| # | 增强 | 覆盖刚需 | 零依赖实现要点 |
+|---|---|---|---|
+| 17+ | `labmate_signal` 加 `action=spectrum` | 振动/声学时程的频域分析（固有频率识别是结构试验标准动作） | radix-2 迭代 FFT（位反转置换+蝶形合并，O(N log N)）纯手写；非二次幂自动零填充至下一 2^k 并在标题明示；单边幅值谱（k=1..half-1 幅值×2 折叠，直流与 Nyquist 不翻倍）；输出 Δf=fs/N、Nyquist、直流（均值）、主峰局部极大降序前 5（1% 幅值阈值滤噪声地板） |
+| 新 skill | `labmate-vibration` | 振动领域引导（第 16 个 skill） | 复制 TEMPLATE：采样方案制定、频谱解读、泄漏与整周期、阻尼半功率带宽、模态分析超界声明；**零新增依赖**（FFT 已内置于 spectrum） |
+
+**验收**：九套单测 451 项全绿（v09 新增 42 项：黄金用例 fs=512、N=512（1 秒）整周期合成信号 y=sin(2π·50t)+0.5·sin(2π·120t)，主峰 **50 Hz→幅值 1、120 Hz→幅值 0.5 精确命中无泄漏**——整周期+二次幂+bin 对准三者同时成立的构造；零填充路径 N=1000→1024 明示，主峰 49.8047/120.117 Hz 位置可靠（偏差 <0.5 Hz）；`_fft` 与朴素 `_dft_naive` 在 N=2/4/8/16 对拍（确定性伪随机+混合正余弦）；Parseval 定理 Σ|X|²=N·Σ|x|²、cos/sin 单频解析值（共轭对称 X[1]=N/2∠-90°）、单位脉冲平坦谱；边界九项：缺 fs/fs 非正/单点/纯直流无峰/两点 nfft=2 走通/未知 action 提示/1% 噪声不撼动首峰）。一次通过无返工。
+
+---
+
 ## 7. 架构升级方案
 
 ```
 labmate/
 ├── bin/labmate_server.py     # MCP 计算引擎：5 → 9（0.2）→ 11（0.3）→ 17（0.4）→ 19 工具（0.4.2 起）
 │   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite / deps
-│   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分）
+│   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分；0.4.5 增 spectrum FFT 频谱）
 │   ├─ 绘图组：plot / curve（0.4.2 SVG 出图 + 曲线特征；0.4.3 bar 柱状 + batch 批量）
 │   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度）/ errors / doe（0.4 新增）
 │   ├─ 写作组：tex / bibtex（0.4 新增）
@@ -217,6 +230,7 @@ labmate/
 │   ├── labmate-literature/    # 文献工作流（聚合+PDF 接地+Zotero/pandoc 指导）
 │   ├── labmate-disclosure/    # 输出校验 + AI 披露（0.3 新增）
 │   ├── labmate-fracture/      # 断裂力学领域模块（0.3 新增）
+│   ├── labmate-vibration/     # 振动领域模块：采样/频谱/固有频率/混叠红线（0.4.5 新增，第 16 个）
 │   └── data/plot/handcalc 等  # 第〇步绑定 MCP 工具
 ```
 

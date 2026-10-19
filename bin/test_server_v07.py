@@ -195,7 +195,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_curve",
                        "arguments": {"action": "batch", "curves": CURVES}}}])
-ok("initialize 版本 = 0.4.4", res[0]["result"]["serverInfo"]["version"] == "0.4.4", res[0])
+ok("initialize 版本 = 0.4.5", res[0]["result"]["serverInfo"]["version"] == "0.4.5", res[0])
 ok("stdio tools/list = 19", len(res[1]["result"]["tools"]) == 19, len(res[1]["result"]["tools"]))
 batch_text = res[2]["result"]["content"][0]["text"]
 ok("stdio tools/call batch 已知值不丢（E=200 ± 10）",

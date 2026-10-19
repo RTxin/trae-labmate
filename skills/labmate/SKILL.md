@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.4.4 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.4.5 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -26,7 +26,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | **实验设计**（正交表/全因子/拉丁超立方） | `labmate_doe` | 素数域生成 L4-L32 标准正交表，正交性有数学保证 |
 | **LaTeX 写作生成**（三线表/图环境/公式） | `labmate_tex` | booktabs 三线表 CSV 直读、多图自动 subfigure |
 | **BibTeX 库工作台**（体检/合并/排序） | `labmate_bibtex` | 跨库去重合并（DOI 优先）、缺字段体检、按年/作者重排 |
-| **试验曲线信号处理**（平滑/插值/积分） | `labmate_signal` | SG 保峰形滤波、Simpson 精确积分、均匀重采样 |
+| **试验曲线信号处理**（平滑/插值/积分/频谱） | `labmate_signal` | SG 保峰形滤波、Simpson 精确积分、均匀重采样；spectrum=FFT 频谱（radix-2 零依赖，非二次幂自动零填充并明示，单边幅值谱+主峰） |
 | **论文级 SVG 绘图**（折线/散点/误差棒/分组柱状） | `labmate_plot` | 零依赖出图：双组对比、对数轴、1-2-5 优雅刻度；bar 柱状图支持类别轴、双系列并列与误差帽；save_path 直接存 .svg 嵌入论文 |
 | **试验曲线特征提取**（E/屈服/峰值/能量） | `labmate_curve` | 弹性模量（初始段回归+R²）、0.2% 偏移屈服、峰值强度、总能量；batch 模式平行试样批量出均值±标准差汇总；拉伸/压缩/直剪一键出特征 |
 | **文献侦察**（多源聚合） | `labmate_search` | arXiv+Crossref+OpenAlex 并发去重，单源失败自动降级 |
@@ -54,6 +54,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 要论文可用的图表 | `labmate-plot` |
 | 岩石力学/岩土工程专项（RMR、Hoek-Brown、Mohr-Coulomb） | `labmate-rockmech` |
 | 裂纹/断裂韧性/疲劳扩展（K、K_IC、Paris、临界裂纹） | `labmate-fracture` |
+| 振动信号/频谱分析/固有频率/采样率与混叠 | `labmate-vibration` |
 | 投稿/终稿前检查、AI 使用披露声明 | `labmate-disclosure` |
 | 多个类型组合 | 依次调用相关模块，consult 类补全信息永远最先 |
 

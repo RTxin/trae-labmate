@@ -21,6 +21,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   设计组（零依赖）：
   labmate_doe       正交表(L4~L32/L9/L27/L25，素数域生成) / 全因子 / 拉丁超立方
   labmate_signal    移动平均与 Savitzky-Golay 平滑 / 线性插值 / 梯形与 Simpson 积分 / 重采样
+                   FFT 频谱分析（radix-2 零依赖实现，非二次幂自动零填充并明示）
   数据组（零依赖，只读本机）：
   labmate_table    本机试验数据体检：CSV / Excel(.xlsx) 读取 + 列统计摘要（零依赖，xlsx 走 zipfile+XML）
   labmate_style    期刊绘图样式注入：ieee/nature/science/中文期刊（SciencePlots 逆向）
@@ -62,7 +63,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.4"
+SERVER_VERSION = "0.4.5"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -2523,6 +2524,47 @@ def _sg_coeffs(window, poly):
         return None
     return [sum(z[p_] * At[p_][j] for p_ in range(m)) for j in range(window)]
 
+def _fft(a):
+    """radix-2 迭代 FFT（位反转置换 + 蝶形合并，O(N log N)）。n 需为 2 的幂。"""
+    n = len(a)
+    if n == 0:
+        return []
+    if n & (n - 1):
+        raise ValueError("_fft 需 2 的幂长度")
+    bits = n.bit_length() - 1
+    rev = [0] * n
+    for i in range(1, n):
+        rev[i] = (rev[i >> 1] >> 1) | ((i & 1) << (bits - 1))
+    x = [complex(v, 0.0) for v in a]
+    for i in range(n):
+        if i < rev[i]:
+            x[i], x[rev[i]] = x[rev[i]], x[i]
+    size = 2
+    while size <= n:
+        ang = -2.0 * math.pi / size
+        wl = complex(math.cos(ang), math.sin(ang))
+        half = size // 2
+        for start in range(0, n, size):
+            w = complex(1.0, 0.0)
+            for k in range(start, start + half):
+                u, v = x[k], x[k + half] * w
+                x[k], x[k + half] = u + v, u - v
+                w *= wl
+        size *= 2
+    return x
+
+def _dft_naive(a):
+    """朴素 O(N²) DFT（测试对拍基准）。"""
+    n = len(a)
+    out = []
+    for k in range(n):
+        s = complex(0.0, 0.0)
+        for i in range(n):
+            ang = -2.0 * math.pi * k * i / n
+            s += complex(a[i] * math.cos(ang), a[i] * math.sin(ang))
+        out.append(s)
+    return out
+
 def tool_signal(args):
     action = str(args.get("action", "smooth")).lower()
     ys = [float(v) for v in (args.get("y") or [])]
@@ -2620,7 +2662,44 @@ def tool_signal(args):
             out.append(y0 if x1 == x0 else y0 + (y1 - y0) * (t - x0) / (x1 - x0))
         shown = ", ".join(_fmt(v) for v in out[:50]) + ("…" if n > 50 else "")
         return "**重采样 %d 点（线性插值，范围 [%s, %s]）**\n%s" % (n, _fmt(px[0]), _fmt(px[-1]), shown)
-    return "❌ 未知 action：%s（支持 smooth / interp / integrate / resample）" % action
+    if action == "spectrum":
+        fs = float(args.get("fs") or 0)
+        if fs <= 0:
+            return "❌ spectrum 需要 fs（采样率，单位 Hz，正数）"
+        if len(ys) < 2:
+            return "❌ spectrum 至少 2 个采样点"
+        n = len(ys)
+        nfft = 1 << (n - 1).bit_length()  # ≥ n 的最小二次幂
+        padded = nfft > n
+        X = _fft(list(ys) + [0.0] * (nfft - n))
+        half = nfft // 2
+        # 单边幅值谱：k=1..half-1 幅值×2（正负频率对称折叠），直流与 Nyquist 不翻倍
+        amp = [abs(X[0]) / nfft]
+        amp += [2.0 * abs(X[k]) / nfft for k in range(1, half)]
+        amp += [abs(X[half]) / nfft] if nfft > 2 else []
+        df = fs / nfft
+        pk = []
+        for k in range(1, half):
+            if amp[k] > amp[k - 1] and amp[k] > amp[k + 1]:
+                pk.append(k)
+        if pk:
+            mx = max(amp[k] for k in pk)
+            pk = sorted((k for k in pk if amp[k] >= 0.01 * mx), key=lambda k: -amp[k])[:5]
+        head = "**FFT 频谱（fs = %s Hz，N = %d%s）**" % (
+            _fmt(fs), n, "，已零填充至 %d 点" % nfft if padded else "")
+        lines = [head,
+                 "频率分辨率 Δf = fs/N = %s Hz；Nyquist = %s Hz（更高的频率分量已混叠，事后不可恢复）"
+                 % (_fmt(df), _fmt(fs / 2.0)),
+                 "直流分量（均值）= %s" % _fmt(sum(ys) / n)]
+        if pk:
+            lines.append("主峰（单边幅值谱，降序前 %d 个局部极大）：" % len(pk))
+            lines += ["  %d. %s Hz    幅值 %s" % (i + 1, _fmt(k * df), _fmt(amp[k]))
+                      for i, k in enumerate(pk)]
+        else:
+            lines.append("主峰：未检出局部极大（数据太短或接近纯直流）")
+        lines.append("（整周期采样时幅值 = 该频率正弦的峰值；非整周期截断有少量泄漏，峰位仍可靠）")
+        return "\n".join(lines)
+    return "❌ 未知 action：%s（支持 smooth / interp / integrate / resample / spectrum）" % action
 
 # ======================================================================
 # 13. 论文级 SVG 绘图与试验曲线特征提取（零依赖，数据不出本机）
@@ -3259,16 +3338,17 @@ TOOLS = [
          "bib_paths": {"type": "array", "description": "多个 .bib 文件（merge 跨库合并）"}},
      "required": ["action"]}},
     {"name": "labmate_signal",
-     "description": "试验曲线信号处理（零依赖）：smooth 移动平均 / Savitzky-Golay 保峰形平滑、interp 线性插值（不外推）、integrate 梯形 / Simpson 数值积分、resample 均匀重采样。",
+     "description": "试验曲线信号处理（零依赖）：smooth 移动平均 / Savitzky-Golay 保峰形平滑、interp 线性插值（不外推）、integrate 梯形 / Simpson 数值积分、resample 均匀重采样、spectrum FFT 频谱（radix-2，非二次幂自动零填充并明示；单边幅值谱 + Δf/Nyquist/主峰）。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "smooth（默认）| interp | integrate | resample"},
+         "action": {"type": "string", "description": "smooth（默认）| interp | integrate | resample | spectrum"},
          "y": {"type": "array", "description": "因变量数组"},
          "x": {"type": "array", "description": "自变量（smooth 可省略视为等间距）"},
          "window": {"type": "integer", "description": "smooth：窗口（奇数），默认 5"},
          "method": {"type": "string", "description": "smooth：ma|savgol；integrate：trapezoid（默认）|simpson"},
          "poly": {"type": "integer", "description": "savgol：多项式阶数，默认 2"},
          "targets": {"type": "array", "description": "interp：目标 x 值"},
-         "n": {"type": "integer", "description": "resample：目标点数，默认 100"}},
+         "n": {"type": "integer", "description": "resample：目标点数，默认 100"},
+         "fs": {"type": "number", "description": "spectrum：采样率（Hz，正数）"}},
      "required": ["y"]}},
     {"name": "labmate_plot",
      "description": "论文级 SVG 绘图（零依赖，数据不出本机）：折线/散点/误差棒/分组柱状，双组数据对比、对数轴、图例、1-2-5 优雅刻度，可直接存 .svg 嵌入论文。",
