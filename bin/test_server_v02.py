@@ -103,7 +103,7 @@ ok("不存在 DOI 友好报错（或网络降级）", ("404" in r or "不存在"
 r = srv.tool_cite({"doi": "10.1038/nature12373"})
 ok("真实 DOI 查询（或优雅降级）", ("BibTeX" in r and "@article" in r) or ("网络查询失败" in r), r[:150])
 
-print("== 11. stdio 冒烟（0.2.0 · 9 工具）==")
+print("== 11. stdio 冒烟（0.3.0 · 11 工具，快照随版本更新）==")
 def rpc(msgs):
     p = subprocess.run([sys.executable, os.path.join(HERE, "labmate_server.py")],
                        input="\n".join(msgs) + "\n", capture_output=True,
@@ -115,9 +115,9 @@ out = rpc([
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_style","arguments":{"style":"ieee"}}}',
 ])
-ok("版本 0.2.0", out[0]["result"]["serverInfo"]["version"] == "0.2.0")
+ok("版本 0.3.0", out[0]["result"]["serverInfo"]["version"] == "0.3.0")
 names = [t["name"] for t in out[1]["result"]["tools"]]
-ok("tools/list = 9", len(names) == 9, names)
+ok("tools/list = 11", len(names) == 11, names)
 ok("新工具全部注册", set(["labmate_table", "labmate_style", "labmate_arxiv", "labmate_cite"]) <= set(names), names)
 ok("required 在 inputSchema 内（cite）", "required" in [t for t in out[1]["result"]["tools"] if t["name"] == "labmate_cite"][0]["inputSchema"], "")
 ok("tools/call style 中文无乱码", "期刊样式" in out[2]["result"]["content"][0]["text"], out[2]["result"]["content"][0]["text"][:80])

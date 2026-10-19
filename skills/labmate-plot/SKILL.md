@@ -7,13 +7,21 @@ description: 论文级图表工具（matplotlib 期刊风格模板）。当用�
 
 依赖：`pip install matplotlib`（中文字体：Windows 用 SimSun/SimHei，macOS 用 Songti/Heiti）
 
-## 期刊风格模板（默认套用）
+## 第〇步：期刊样式从 labmate_style 取（不要手写/凭记忆给 rcParams）
+
+出图前先调 MCP 工具 `labmate_style(style=...)`，四种期刊样式（science/ieee/nature/cnjournal，SciencePlots 逆向，零依赖）：
+
+- 用户没指定期刊 → 默认 `science`；IEEE 系 → `ieee`；Nature 系 → `nature`；中文学报/学位论文 → `cnjournal`
+- 工具返回完整 rcParams 键值：让 AI 原样写入 `mpl.rcParams.update({...})`，或传 `save_mplstyle` 写文件后 `plt.style.use()`
+- 用户给了目标期刊投稿指南 → 以指南为准，工具样式为基线微调（单双栏宽、字号），并说明改了哪几项
+
+## 期刊风格模板（science 默认，参数以 labmate_style 返回为准）
 
 ```python
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-# 期刊参数：单栏 8.5cm 双栏 17.5cm，字号 7-9pt
+# 下面这组参数由 labmate_style(style="science") 返回后原样填入
 mpl.rcParams.update({
     'font.family': 'serif', 'font.size': 8,
     'axes.linewidth': 0.8, 'xtick.direction': 'in', 'ytick.direction': 'in',

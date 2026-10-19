@@ -1,6 +1,6 @@
 ---
 name: labmate
-description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、曲线拟合、公式推导、有限元、单位换算、论文图表，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/symbols/fem/plot/rockmech）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「这个设备够不够」「拟合参数」等科研场景。
+description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、曲线拟合、公式推导、有限元、单位换算、论文图表、文献检索、本地 PDF 精读，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/symbols/fem/plot/rockmech/fracture/literature/disclosure）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「这个设备够不够」「拟合参数」「读一下这篇论文」等科研场景。
 ---
 
 # LabMate 科研搭子 · 主路由
@@ -9,21 +9,23 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.2.0 · 九件套）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.3.0 · 十一件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
 | 单位换算（力/应力/长度/能量/功率） | `labmate_convert` | 带换算链，杜绝手算事故 |
-| 计算 + 教科书式过程排版 | `labmate_handcalc` | 公式→代入→结果，可逐步校核 |
+| 计算 + 教科书式过程排版 | `labmate_handcalc` | 公式→代入→结果，可逐步校核；fmt=latex 直接出 Overleaf 稿 |
 | Mohr 圆 / 强度包络 / 破坏初判 | `labmate_mohr` | 圆心半径 τmax + c-φ 包络，可存 SVG |
 | 快速拟合（线性/幂律/指数 + R²） | `labmate_fit_lite` | 量级判断够用；物理约束与不确定性走 lmfit |
 | **本机试验数据摸底**（CSV 列统计） | `labmate_table` | 只读不写、数据不出本机；先体检再决定处理方案 |
 | **论文级图表样式** | `labmate_style` | ieee/nature/science/中文期刊四种，可写 .mplstyle |
-| **文献检索**（arXiv） | `labmate_arxiv` | 官方 API 真实元数据，免费无 key |
+| **文献侦察**（多源聚合） | `labmate_search` | arXiv+Crossref+OpenAlex 并发去重，单源失败自动降级 |
+| **arXiv 单源检索** | `labmate_arxiv` | 官方 API 真实元数据，免费无 key |
 | **DOI → BibTeX** | `labmate_cite` | Crossref 真实元数据生成引用，杜绝幻觉文献 |
+| **本地 PDF 精读** | `labmate_pdf` | stats/extract/search：按页提取+关键词页码溯源；只读，数据不出本机 |
 | 环境体检 | `labmate_deps` | 首次使用前跑一次，按结果决定重活是否 pip 安装 |
 
-分工：**MCP 工具是"手"（确定性计算与真实数据源，结果可信可复现），skills 是"脑"（科研引导与复杂分析）**。写一次性脚本只在前者覆盖不了时发生（复杂数据处理、符号推导、FEM——见下方路由表）。文献类任务优先走 `labmate-literature` 的完整工作流。
+分工：**MCP 工具是"手"（确定性计算与真实数据源，结果可信可复现），skills 是"脑"（科研引导与复杂分析）**。写一次性脚本只在前者覆盖不了时发生（复杂数据处理、符号推导、FEM——见下方路由表）。文献类任务优先走 `labmate-literature` 的完整工作流（聚合检索→本地 PDF 接地精读→真实引用）。
 
 ## 第一步：路由（判断任务类型）
 
@@ -38,6 +40,8 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 应力场/变形/有限元建模分析 | `labmate-fem` |
 | 要论文可用的图表 | `labmate-plot` |
 | 岩石力学/岩土工程专项（RMR、Hoek-Brown、Mohr-Coulomb） | `labmate-rockmech` |
+| 裂纹/断裂韧性/疲劳扩展（K、K_IC、Paris、临界裂纹） | `labmate-fracture` |
+| 投稿/终稿前检查、AI 使用披露声明 | `labmate-disclosure` |
 | 多个类型组合 | 依次调用相关模块，consult 类补全信息永远最先 |
 
 ## 通用科研工作流原则（无论路由到哪都遵守）

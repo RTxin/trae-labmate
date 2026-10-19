@@ -14,25 +14,32 @@ LabMate 的灵魂是一个**引导协议**：AI 像研究生一样先把缺失�
 labmate/
 ├── .trae-plugin/plugin.json          # 插件清单（skills + MCP server 声明）
 ├── bin/
-│   ├── labmate_server.py             # MCP 计算引擎（Python 零依赖，五工具）
-│   └── test_server.py                # 20 项单测 + stdio 冒烟（全部通过）
+│   ├── labmate_server.py             # MCP 计算引擎（Python 零依赖，十一件套）
+│   ├── test_server.py / test_server_v02.py / test_server_v03.py  # 全量单测
 ├── skills/
 │   ├── labmate/            # 主 skill：MCP 工具优先级 + 任务路由 + 工作流原则
 │   ├── labmate-consult/    # 试验咨询引导协议（识图/参数补全/量级校核）
-│   ├── labmate-units/      # 单位与量纲（pint）        labmate-handcalc/ 教科书式手算
+│   ├── labmate-units/      # 单位与量纲（pint）        labmate-handcalc/ 教科书式手算（含 LaTeX）
 │   ├── labmate-fit/        # 数据拟合与参数反演（lmfit） labmate-data/     试验数据处理
 │   ├── labmate-symbols/    # 符号推导（sympy）           labmate-fem/       有限元工具链
-│   ├── labmate-plot/       # 论文级图表                  labmate-rockmech/  领域模块示例
+│   ├── labmate-plot/       # 论文级图表                  labmate-rockmech/  岩石力学领域模块
+│   ├── labmate-fracture/   # 断裂力学/疲劳领域模块       labmate-literature/ 文献工作流
+│   └── labmate-disclosure/ # 输出校验 + AI 使用披露模板
 ├── TEMPLATE-SKILL.md       # 新领域模块模板
 └── README.md
 ```
 
-**两层分工**：`bin/labmate_server.py` 是"手"——MCP 计算引擎（v0.2.0，九件套，全部零第三方依赖）：计算组 `labmate_convert` 单位换算、`labmate_handcalc` 三段式计算排版（AST 安全求值）、`labmate_mohr` Mohr 圆+包络+SVG、`labmate_fit_lite` 内置最小二乘、`labmate_table` 本机试验数据体检（CSV 列统计，只读不写）、`labmate_style` 期刊绘图样式注入（SciencePlots 逆向：ieee/nature/science/中文期刊）、`labmate_deps` 科学栈体检；文献组 `labmate_arxiv`（官方免费 API 真实检索）、`labmate_cite`（Crossref DOI→真实 BibTeX，杜绝幻觉引用）。skills 是"脑"——科研引导协议与复杂分析（含新增的 labmate-literature 文献工作流：检索→筛选→精读→引用，幻觉防护铁律）。AI 被指示优先调用 MCP 工具而非现场手写脚本。
+**两层分工**：`bin/labmate_server.py` 是"手"——MCP 计算引擎（v0.3.0，十一件套，全部零第三方依赖，纯标准库可跑）：
 
-**产品决策依据**：见 `docs/PRD.md`（基于双路调研：研究者时间分配与信任度数据 + 九款 AI 科研产品竞品矩阵；本插件的差异化定位 = 文献之外的两块空白——本机试验数据与 AI 新手引导）。**50 项单测**（`bin/test_server.py` + `bin/test_server_v02.py`）全部通过。
+- 计算/本地组（完全离线）：`labmate_convert` 单位换算、`labmate_handcalc` 三段式计算排版（AST 白名单安全求值，**fmt=latex 直接输出可贴 Overleaf 的 align\* 推导**）、`labmate_mohr` Mohr 圆+包络+SVG、`labmate_fit_lite` 内置最小二乘、`labmate_table` 本机 CSV 数据体检（只读不写）、`labmate_style` 期刊绘图样式（ieee/nature/science/中文期刊）、`labmate_deps` 科学栈体检、**`labmate_pdf` 本地 PDF 零依赖处理（stats 体检/extract 按页提取/search 关键词页码溯源，扫描版诚实诊断，数据不出本机）**
+- 文献组（标准库 urllib）：`labmate_arxiv` arXiv 真实检索、`labmate_cite` Crossref DOI→真实 BibTeX（杜绝幻觉引用）、**`labmate_search` 多源聚合（arXiv+Crossref+OpenAlex 线程并发+DOI/标题双策略跨源去重，单源失败自动降级并给诊断，支持年份过滤）**
+
+skills 是"脑"——13 个科研引导模块：主路由、试验咨询、单位、手算、拟合、数据、符号、FEM、图表、岩石力学、断裂力学（按模板扩展的第二个领域实证）、文献工作流（聚合检索→本地 PDF 接地精读→真实引用→Zotero/pandoc 对接指导）、披露合规（交付前四类校验清单 + 中英双语 AI 使用声明模板）。AI 被指示优先调用 MCP 工具而非现场手写脚本。
+
+**产品决策依据**：见 `docs/PRD.md`（基于双路调研：研究者时间分配与信任度数据 + 九款 AI 科研产品竞品矩阵；差异化定位 = 文献之外的两块空白——本机试验数据与 AI 新手引导，以及"本地优先/数据不出本机"）。全量单测见 `bin/test_server*.py`（含 PDF 解析、跨源去重、LaTeX 渲染的离线 fixture）。
 
 **扩展方式（零改动主框架）**：
-1. 复制 `TEMPLATE-SKILL.md`，填入新领域（断裂力学、振动、流体、热学……）
+1. 复制 `TEMPLATE-SKILL.md`，填入新领域（振动、流体、热学……；断裂力学 `labmate-fracture` 是完整示例）
 2. 放到 `skills/labmate-<domain>/`
 3. 在主 skill 的路由表加一行
 

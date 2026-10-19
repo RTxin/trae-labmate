@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.2.0（基于 0.1.0 升级） |
+| 版本 | 0.3.0（P1 全量落地 + P2 两项提前实施） |
 | 日期 | 2026-10-19 |
-| 状态 | P0 已实施 |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成、P2 完成多源聚合+本地 PDF 两项（0.3.0） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -100,18 +100,19 @@
 
 **P0 技术约束**：全部用 Python 标准库（urllib/csv/json/xml），保持零第三方依赖；网络工具失败时优雅降级并给诊断信息。
 
-### P1（skill 层增强）
-- 新增 `labmate-literature` skill：文献工作流（检索→筛选→精读提问模板→引用管理），绑定 P0 的 2 个工具
-- `labmate-handcalc` 增强：LaTeX 输出选项（可贴 Overleaf）
-- `labmate-data` 增强：明确"先 labmate_table 摸底再写脚本"的两步流程
-- `labmate-plot` 增强：绑定 `labmate_style`，AI 一键注入样式
-- 输出校验与 AI 使用声明模板（写入 consult/plot 的输出规范）
+### P1（0.2.0~0.3.0 已全部落地）
+- ✅ 新增 `labmate-literature` skill：文献工作流（检索→筛选→精读→引用），绑定真实数据源工具
+- ✅ `labmate_handcalc` 增强：`fmt=latex` 输出 align* 推导（AST 递归渲染，希腊字母/下标/分式/科学计数自动转换，可贴 Overleaf）
+- ✅ `labmate-data` 增强：第〇步铁律"先 labmate_table 摸底再写脚本"
+- ✅ `labmate-plot` 增强：第〇步绑定 `labmate_style`，rcParams 必须来自工具返回
+- ✅ 输出校验与 AI 使用声明：独立 `labmate-disclosure` skill（四类交付前校验清单 + 期刊/学位论文/基金中英双语声明模板）
 
-### P2（Roadmap）
-- 多源文献聚合检索（arXiv+Crossref+OpenAlex 并发+去重）
-- 本地 PDF 接地问答（pypdf，页码溯源）
-- Zotero 对接、pandoc 格式转换（skill 指导）
-- 新领域模块（断裂/振动/流体）按 TEMPLATE 扩展
+### P2（Roadmap，0.3.0 已提前实施两项）
+- ✅ 多源文献聚合检索：`labmate_search`（arXiv+Crossref+OpenAlex 线程并发 + DOI/标题相似度双策略去重 + 单源失败降级 + 年份过滤）
+- ✅ 本地 PDF 接地问答：`labmate_pdf`（**坚持零依赖，未引入 pypdf**——zlib + 手写 PDF 文本算子解析；stats/extract/search 三动作，关键词命中带页码上下文；扫描版/CID 中文/加密 PDF 诚实诊断边界）
+- ✅ Zotero/pandoc 对接：以指导形式写入 labmate-literature（依赖用户本机环境，不进 server）
+- ✅ 新领域模块：`labmate-fracture`（断裂力学/疲劳：K/K_IC/临界裂纹/Paris/E399 有效性，复用 handcalc+fit_lite，验证 TEMPLATE 扩展路径）
+- 后续：振动/流体领域模块按需复制 TEMPLATE；多源检索可加 Semantic Scholar（需 key）
 
 ---
 
@@ -119,13 +120,17 @@
 
 ```
 labmate/
-├── bin/labmate_server.py     # MCP 计算引擎 0.1→0.2：5 工具 → 9 工具
-│   ├─ 计算组：convert / handcalc / mohr / fit_lite / deps（原有）
-│   └─ 新增组：arxiv / cite / table / style（本轮 P0）
+├── bin/labmate_server.py     # MCP 计算引擎：5 → 9（0.2）→ 11 工具（0.3）
+│   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite / deps
+│   ├─ 数据组：table / style
+│   ├─ 文献组：arxiv / cite / search（0.3 多源聚合）
+│   └─ 本地组：pdf（0.3 零依赖 PDF 接地）
 ├── skills/
-│   ├── labmate/               # 主路由：新增工具优先级表更新
-│   ├── labmate-literature/    # 新增：文献工作流
-│   └── （其余 skills 增强）
+│   ├── labmate/               # 主路由：工具优先级表（11 工具）
+│   ├── labmate-literature/    # 文献工作流（聚合+PDF 接地+Zotero/pandoc 指导）
+│   ├── labmate-disclosure/    # 输出校验 + AI 披露（0.3 新增）
+│   ├── labmate-fracture/      # 断裂力学领域模块（0.3 新增）
+│   └── data/plot/handcalc 等  # 第〇步绑定 MCP 工具
 ```
 
 工具分组原则：**确定性可复现的进 server，需要判断力/上下文的进 skill**。

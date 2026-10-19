@@ -1,7 +1,7 @@
 {
   "name": "labmate",
-  "version": "0.2.0",
-  "description": "科研搭子：面向力学及物理科学研究者的 Trae 助手——九件套 MCP 计算引擎（单位换算/手算排版/Mohr圆/拟合/数据体检/期刊样式/arXiv检索/DOI引用/科学栈体检）+ 科研引导协议 skills。零第三方依赖。",
+  "version": "0.3.0",
+  "description": "科研搭子：面向力学及物理科学研究者的 Trae 助手——十一件套 MCP 引擎（单位换算/手算排版+LaTeX/Mohr圆/拟合/数据体检/期刊样式/arXiv/DOI引用/多源文献聚合/本地PDF溯源/科学栈体检）+ 13 个科研引导 skills。零第三方依赖，数据不出本机。",
   "author": {
     "name": "1024Builder"
   },
@@ -36,14 +36,14 @@
       "zh-cn": "科研搭子"
     },
     "description": {
-      "en": "A research companion for mechanics & physics researchers: eliciting unspoken expert assumptions, plus a toolbox of units, handcalcs, fitting, FEM, and publication-grade plotting.",
-      "zh-cn": "面向力学/物理科研工作者的研究搭档：先把你没说出口的参数问出来（试验引导协议），再用工具接住计算——单位换算、教科书式手算、数据拟合、有限元、论文级图表。模块化架构，新领域按模板即插即用。"
+      "en": "A research companion for mechanics & physics researchers: eliciting unspoken expert assumptions, plus an 11-tool zero-dependency engine (units, handcalcs+LaTeX, fitting, CSV profiling, journal styles, arXiv/Crossref/OpenAlex federated search, local PDF grounding, DOI citations) and 13 guided research skills.",
+      "zh-cn": "面向力学/物理科研工作者的研究搭档：先把你没说出口的参数问出来（试验引导协议），再用十一件套零依赖工具接住计算与文献——单位换算、教科书式手算（含 LaTeX）、数据拟合、本机数据体检、期刊样式、多源文献聚合、本地 PDF 页码溯源、真实 DOI 引用。模块化架构，新领域按模板即插即用。"
     }
   },
   "interface": {
     "displayName": "LabMate · 科研搭子",
     "shortDescription": "力学/物理科研助手，模块化可扩展",
-    "longDescription": "为'会用专业工具但不研究 AI'的科研专家设计。核心是一个引导协议：AI 主动把试验问题里缺失的参数问清楚（尺寸、材料、设备、目的），再给带量级和过程的回答；外层是九个工具模块——试验咨询、单位换算、手算排版、数据拟合、试验数据处理、符号推导、有限元、论文图表、岩石力学示例。任何新领域（断裂、振动、流体……）按模板扩展，主框架零改动。",
+    "longDescription": "为'会用专业工具但不研究 AI'的科研专家设计。核心是一个引导协议：AI 主动把试验问题里缺失的参数问清楚（尺寸、材料、设备、目的），再给带量级和过程的回答；外层是十一个确定性 MCP 工具（单位换算、手算排版+LaTeX、Mohr 圆、拟合、CSV 体检、期刊样式、arXiv/DOI/多源聚合文献、本地 PDF 接地精读、环境体检）与十三个引导模块（试验咨询、单位、手算、拟合、数据、符号、FEM、图表、岩石力学、断裂力学、文献工作流、披露合规）。任何新领域（振动、流体……）按模板扩展，主框架零改动。",
     "developerName": "1024Builder",
     "category": "Education",
     "capabilities": [
@@ -54,8 +54,9 @@
     "defaultPrompt": [
       "帮我分析这个试验方案",
       "处理这组试验数据",
-      "100kN 的设备能剪坏这个试样吗",
-      "拟合这组数据求 c 和 φ"
+      "聚合检索这个方向的最新文献",
+      "读一下这篇本地 PDF 并标注页码",
+      "100kN 的设备能剪坏这个试样吗"
     ]
   },
   "logo": "./assets/icon.svg",
