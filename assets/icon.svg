@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2b3d"/>
+      <stop offset="1" stop-color="#1d4e6b"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- 曲线坐标（科研图表） -->
+  <polyline points="22,102 22,26 110,26" fill="none" stroke="#3d6b8a" stroke-width="4" stroke-linecap="round"/>
+  <!-- 应力-应变曲线 -->
+  <path d="M24 100 C 40 100, 52 60, 62 42 C 72 26, 84 66, 104 74" fill="none" stroke="#8fd4a8" stroke-width="5" stroke-linecap="round"/>
+  <!-- 峰值标记 -->
+  <circle cx="66" cy="40" r="4.5" fill="#f0a24b"/>
+  <!-- 坐标刻度 -->
+  <line x1="22" y1="64" x2="27" y2="64" stroke="#3d6b8a" stroke-width="3"/>
+  <line x1="64" y1="102" x2="64" y2="97" stroke="#3d6b8a" stroke-width="3"/>
+  <!-- 底部：公式元素 sigma -->
+  <text x="100" y="116" font-family="Georgia, serif" font-size="20" font-style="italic" fill="#e8eef9" text-anchor="middle">σ</text>
+  <text x="22" y="18" font-family="Georgia, serif" font-size="15" font-style="italic" fill="#8fd4a8">τ</text>
+</svg>
