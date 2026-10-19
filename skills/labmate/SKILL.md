@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.4.6 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.4.7 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -17,6 +17,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 计算 + 教科书式过程排版 | `labmate_handcalc` | 公式→代入→结果，可逐步校核；fmt=latex 直接出 Overleaf 稿 |
 | Mohr 圆 / 强度包络 / 破坏初判 | `labmate_mohr` | 圆心半径 τmax + c-φ 包络，可存 SVG |
 | 快速拟合（线性/幂律/指数 + R²） | `labmate_fit_lite` | 量级判断够用；物理约束与不确定性走 lmfit |
+| **多元线性回归**（多因素 → 单响应） | `labmate_fit_lite` | model=multi：系数 t 检验（显著/不显著）+ 调整 R²（惩罚多余变量）+ 整体 F 检验；x 支持按变量分组或按样本分行自动转置 |
 | **本机试验数据摸底**（CSV / Excel 列统计） | `labmate_table` | csv_path / xlsx_path 通吃（xlsx 零依赖解析，多工作表/日期/稀疏空位）；只读不写、数据不出本机；先体检再决定处理方案 |
 | **论文级图表样式** | `labmate_style` | ieee/nature/science/中文期刊四种，可写 .mplstyle |
 | **统计分析**（t 检验/ANOVA/正态性/置信区间/样本量） | `labmate_stats` | 零依赖精确 p 值 + Cohen's d/η² 效应量 |

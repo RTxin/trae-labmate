@@ -85,7 +85,7 @@ out = rpc([
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_convert","arguments":{"value":100,"from":"kN","to":"kgf"}}}',
 ])
 ok("initialize 应答", out[0]["result"]["serverInfo"]["name"] == "labmate")
-ok("tools/list 19 个工具（0.4.6）", len(out[1]["result"]["tools"]) == 19, str(len(out[1]["result"].get("tools", []))))
+ok("tools/list 19 个工具（0.4.7）", len(out[1]["result"]["tools"]) == 19, str(len(out[1]["result"].get("tools", []))))
 ok("tools/call 中文无乱码", "kgf" in out[2]["result"]["content"][0]["text"], out[2]["result"]["content"][0]["text"][:60])
 
 print("\n========== %d 通过，%d 失败 ==========" % (passed, failed))

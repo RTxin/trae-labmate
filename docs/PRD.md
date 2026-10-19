@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.6（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合） |
+| 版本 | 0.4.7（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归） |
 | 日期 | 2026-10-20 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -224,12 +224,25 @@
 
 ---
 
+### P10（0.4.7 · 多因素分析默认答案：多元线性回归，仍 19 工具）
+
+**复核结论**：试验数据的多因素问题（强度 ~ 水胶比 + 龄期 + 掺量；变形 ~ 温度 + 围压）此前只有两条路——逐个单因素 fit_lite（丢信息，无法判定"哪个因素真的重要"）或装 numpy/lmfit（对零依赖开箱即用的定位是断崖）。而"哪个因素显著、各占多少、模型该留几个变量"正是审稿人必问、报告必写的标准动作。0.4.7 不新增工具，`labmate_fit_lite` 加 `model=multi`（与 linear/poly/power/exp 并列）：x 支持按变量分组（与 stress/cycles 平行传参惯例一致）或按样本分行（自动转置），一维退化为单自变量；系数 t 检验复用 stats 的 `_t_sf` 精确尾概率、整体 F 复用 `_f_sf`——零新分布代码。底层从 `_polyfit` 提取 `_gauss_solve` 列主元消元（行为等价重构，487 项历史测试守护），正规方程与逆矩阵用增广 [XᵀX | Xᵀy | I] 一次消元同解（右端经历同一行变换，置换自动抵消）——零重复数值逻辑。
+
+| # | 增强 | 覆盖刚需 | 零依赖实现要点 |
+|---|---|---|---|
+| 4+ | `labmate_fit_lite` 加 `model=multi` | 多因素试验标准分析（因素显著性/变量取舍/模型比较） | OLS 含截距；x 两种形态自动对齐（按变量分组优先；行数 = n 且各行等长时转置）；系数表含 t/p/显著标注（p<0.05）、调整 R² = 1−(1−R²)(n−1)/(n−p−1)（惩罚多余自变量）、整体 F、残差标准误 s；边界全拦截：共线（x2=2x1 奇异）、样本量不足（n<p+2）、形态无法对齐、非数值、y 无波动（R² 无定义明示）；n<5p 样本量偏少警示；完美拟合（s=0）不做 t 检验（检验无意义，诚实明示） |
+| skill 补充 | `labmate-fit` 加零依赖通道提示 + 主路由加行 | 引导闭环 | fit skill 开头"先查零依赖通道"：多元线性回归不必装 lmfit 直接走 multi；lmfit 留给非线性本构/物理边界/参数不确定性 |
+
+**验收**：十一套单测 533 项全绿（v11 新增 46 项：黄金用例 y=2+3x₁−0.5x₂ 零噪声**精确还原 b0=2/b1=3/b2=−0.5/R²=1**；确定性 ±0.05 扰动用例全参数固化断言——b0=2.02371/b1=2.98935/b2=−0.494291/R²=0.999923/**调整 R²=0.999872（=1−(1−R²)·5/3 手工可验）**/F=19570.6/s=0.0529429；按行自动转置与按列传参结果一致；无关变量判"不显著"（p=0.342245）；共线/样本不足/形态/非数值/y 无波动边界；`_gauss_solve` 多右端列数学断言（A⁻¹ 两列一次解出）；`_polyfit` 重构等价性；协议层与 stdio 冒烟）。一次通过无返工。
+
+---
+
 ## 7. 架构升级方案
 
 ```
 labmate/
 ├── bin/labmate_server.py     # MCP 计算引擎：5 → 9（0.2）→ 11（0.3）→ 17（0.4）→ 19 工具（0.4.2 起）
-│   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite / deps
+│   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite（0.4.7 增 multi 多元线性回归）/ deps
 │   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分；0.4.5 增 spectrum FFT 频谱）
 │   ├─ 绘图组：plot / curve（0.4.2 SVG 出图 + 曲线特征；0.4.3 bar 柱状 + batch 批量）
 │   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度；0.4.6 增 sn S-N 疲劳拟合）/ errors / doe（0.4 新增）

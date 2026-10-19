@@ -8,12 +8,12 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.6 · 十九件套）：
+工具（0.4.7 · 十九件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
   labmate_mohr      Mohr 圆计算 + 纯 Python SVG 绘图
-  labmate_fit_lite  内置最小二乘拟合（线性/二次/指数/幂律）+ R²
+  labmate_fit_lite  内置最小二乘拟合（线性/二次/指数/幂律 + 多元线性回归）+ R²
   labmate_errors    不确定度传播（GUM 一阶数值偏导）+ 线性回归参数区间
   统计组（零依赖，t/F/卡方分布精确尾概率）：
   labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA / JB 正态性 / 置信区间 / 样本量
@@ -64,7 +64,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.6"
+SERVER_VERSION = "0.4.7"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -362,11 +362,9 @@ def _mohr_svg(circles, c, phi, w=520, h=400):
 # ======================================================================
 # 4. 内置最小二乘拟合
 # ======================================================================
-def _polyfit(xs, ys, deg):
-    n, m = len(xs), deg + 1
-    A = [[math.pow(x, p) for p in range(m)] + [y] for x, y in zip(xs, ys)]
-    # 高斯消元解正规方程（零依赖）
-    M = [[sum(A[k][i] * A[k][j] for k in range(n)) for j in range(m)] + [sum(A[k][i] * A[k][m] for k in range(n))] for i in range(m)]
+def _gauss_solve(M, m, ncols):
+    """列主元高斯消元：M 为 m×ncols 增广矩阵（前 m 列为系数矩阵），就地消元。
+    返回 ncols-m 个右端列的解（每个解为 m 维列表）；主元过小（奇异/共线）返回 None。"""
     for i in range(m):
         piv = max(range(i, m), key=lambda r: abs(M[r][i]))
         if abs(M[piv][i]) < 1e-12:
@@ -374,15 +372,33 @@ def _polyfit(xs, ys, deg):
         M[i], M[piv] = M[piv], M[i]
         for r in range(i + 1, m):
             f = M[r][i] / M[i][i]
-            for c2 in range(i, m + 1):
+            for c2 in range(i, ncols):
                 M[r][c2] -= f * M[i][c2]
-    coef = [0.0] * m
-    for i in range(m - 1, -1, -1):
-        s = M[i][m] - sum(M[i][j] * coef[j] for j in range(i + 1, m))
-        coef[i] = s / M[i][i]
-    return coef
+    out = []
+    for col in range(m, ncols):
+        coef = [0.0] * m
+        for i in range(m - 1, -1, -1):
+            s = M[i][col] - sum(M[i][j] * coef[j] for j in range(i + 1, m))
+            coef[i] = s / M[i][i]
+        out.append(coef)
+    return out
+
+def _solve_normal(rows, ys, m):
+    """最小二乘正规方程 XᵀXβ = Xᵀy 求解（零依赖）。rows: n×m 设计矩阵行列表。奇异返回 None。"""
+    n = len(rows)
+    M = [[sum(rows[k][i] * rows[k][j] for k in range(n)) for j in range(m)] +
+         [sum(rows[k][i] * ys[k] for k in range(n))] for i in range(m)]
+    sol = _gauss_solve(M, m, m + 1)
+    return sol[0] if sol else None
+
+def _polyfit(xs, ys, deg):
+    m = deg + 1
+    rows = [[math.pow(x, p) for p in range(m)] for x in xs]
+    return _solve_normal(rows, ys, m)
 
 def tool_fit(args):
+    if args.get("model") == "multi":
+        return _fit_multi(args)
     xs = [float(v) for v in args.get("x", [])]
     ys = [float(v) for v in args.get("y", [])]
     model = args.get("model", "linear")
@@ -416,7 +432,7 @@ def tool_fit(args):
         yh = [math.exp(coef[0]) * math.exp(coef[1] * x) for x in xs]
         expr = "y = %s·exp(%s·x)" % (_fmt(math.exp(coef[0])), _fmt(coef[1]))
     else:
-        return "❌ 未知模型 %s：支持 linear/poly、power、exp" % model
+        return "❌ 未知模型 %s：支持 linear/poly、power、exp、multi（多元线性回归）" % model
     ybar = sum(ys) / n
     ss_res = sum((y - yh2) ** 2 for y, yh2 in zip(ys, yh))
     ss_tot = sum((y - ybar) ** 2 for y in ys)
@@ -427,6 +443,98 @@ def tool_fit(args):
         term = "拟合表达式：" + expr
     return ("**%s**\n%s\n\n数据点 n = %d，R² = %s\n\n（物理边界约束、参数不确定性请升级 lmfit："
             "pip install lmfit；本工具适合快速量级判断）" % (model, term, n, _fmt(r2)))
+
+def _fit_multi(args):
+    """多元线性回归（OLS，含截距）：x 支持两种形态——
+    ① 按自变量分组 [x1数组, x2数组, ...]（每个与 y 等长，与 stress/cycles 平行传参惯例一致）；
+    ② 按样本分行 [[x1_i, x2_i], ...]（行数 = n 且各行等长时自动转置）；一维数组视为单自变量。
+    增广 [XᵀX | Xᵀy | I] 一次消元同解 β 与 (XᵀX)⁻¹（右端经历同一行变换，置换自动抵消），
+    系数标准误 = s·√(XᵀX)⁻¹ᵢᵢ，t/p 复用 _t_sf，整体 F 复用 _f_sf。"""
+    raw_x, raw_y = args.get("x"), args.get("y")
+    if not isinstance(raw_y, list) or not raw_y or not isinstance(raw_x, list) or not raw_x:
+        return "❌ multi 需要 x（自变量）与 y（因变量数组）"
+    try:
+        ys = [float(v) for v in raw_y]
+    except (TypeError, ValueError):
+        return "❌ y 含非数值元素"
+    n = len(ys)
+    # x 形态识别：嵌套先按"每个元素 = 一个自变量数组"对齐 y，不成再按"每行一个样本"转置
+    cols = None
+    if isinstance(raw_x[0], list):
+        try:
+            cand = [[float(v) for v in col] for col in raw_x]
+        except (TypeError, ValueError):
+            return "❌ x 含非数值元素"
+        if all(len(col) == n for col in cand):
+            cols = cand
+        elif len(cand) == n and len(set(len(col) for col in cand)) == 1:
+            cols = [list(t) for t in zip(*cand)]
+        else:
+            return ("❌ x 形态无法对齐 y（n = %d）：期望 x = [x1数组, x2数组, ...]（每个自变量与 y 等长），"
+                    "或每行一个样本（行数 = n 且各行等长，自动转置）" % n)
+    else:
+        try:
+            cols = [[float(v) for v in raw_x]]
+        except (TypeError, ValueError):
+            return "❌ x 含非数值元素"
+    p = len(cols)
+    if n < p + 2:
+        return ("❌ 样本量不足：n = %d，识别到 p = %d 个自变量；至少需要 p + 2 = %d 个样本"
+                "（保证残差自由度 ≥ 1），建议 n ≥ 5p" % (n, p, p + 2))
+    m = p + 1  # 含截距
+    rows = [[1.0] + [col[i] for col in cols] for i in range(n)]
+    M = [[sum(rows[k][i] * rows[k][j] for k in range(n)) for j in range(m)] +
+         [sum(rows[k][i] * ys[k] for k in range(n))] +
+         [1.0 if i == j else 0.0 for j in range(m)] for i in range(m)]
+    sol = _gauss_solve(M, m, 2 * m + 1)
+    if sol is None:
+        return "❌ 奇异：自变量共线（如 x2 = 2·x1）或退化（无波动），无法求解"
+    beta, inv_diag = sol[0], [sol[1 + j][j] for j in range(m)]
+    yh = [sum(beta[j] * rows[i][j] for j in range(m)) for i in range(n)]
+    ybar = sum(ys) / n
+    ss_res = sum((y - h) ** 2 for y, h in zip(ys, yh))
+    ss_tot = sum((y - ybar) ** 2 for y in ys)
+    df_res = n - p - 1
+    s = math.sqrt(ss_res / df_res) if df_res > 0 else float("nan")
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    adj = 1 - (1 - r2) * (n - 1) / df_res if ss_tot > 0 else float("nan")
+    lines = ["**多元线性回归（OLS，n = %d 个样本，p = %d 个自变量，含截距）**" % (n, p)]
+    eq = _fmt(beta[0])
+    for j in range(1, m):
+        eq += (" + " if beta[j] >= 0 else " - ") + "%s·x%d" % (_fmt(abs(beta[j])), j)
+    lines.append("回归方程：y = " + eq)
+    if s == 0:
+        lines.append("")
+        lines.append("系数（残差为 0：数据完美落在模型上，t 检验无意义，仅列数值）：")
+        lines.append("  截距 b0 = %s" % _fmt(beta[0]))
+        for j in range(1, m):
+            lines.append("  b%d（x%d）= %s" % (j, j, _fmt(beta[j])))
+    else:
+        lines.append("")
+        lines.append("系数（t 检验，H0: βi = 0，df = %d）：" % df_res)
+        for j in range(m):
+            se = s * math.sqrt(abs(inv_diag[j]))
+            t = beta[j] / se
+            pv = 2 * _t_sf(t, df_res)
+            tag = "显著" if pv < 0.05 else "不显著"
+            name = "截距 b0" if j == 0 else "b%d（x%d）" % (j, j)
+            lines.append("  %s = %s（t = %s，p ≈ %s，%s）" % (name, _fmt(beta[j]), _fmt(t), _fmt(pv), tag))
+        F = (r2 / p) / ((1 - r2) / df_res) if ss_tot > 0 and r2 < 1 else None
+        if F is not None:
+            lines.append("整体 F = %s（df1 = %d，df2 = %d，p ≈ %s）"
+                         % (_fmt(F), p, df_res, _fmt(_f_sf(F, p, df_res))))
+    lines.append("")
+    if ss_tot > 0:
+        lines.append("R² = %s，调整 R² = %s（惩罚多余自变量）" % (_fmt(r2), _fmt(adj)))
+    else:
+        lines.append("R² 无定义（y 无波动）")
+    lines.append("残差标准误 s = %s" % _fmt(s))
+    if n < 5 * p:
+        lines.append("")
+        lines.append("⚠ 样本量偏少（n = %d < 5p = %d）：系数估计不稳定，结果仅供量级参考" % (n, 5 * p))
+    lines.append("")
+    lines.append("（调整 R² 用于比较自变量个数不同的模型；自变量高度相关（共线）会使系数不稳定）")
+    return "\n".join(lines)
 
 # ======================================================================
 # 4.5 本机试验数据体检（csv 零依赖）
@@ -3263,10 +3371,11 @@ TOOLS = [
          "save_svg": {"type": "string", "description": "SVG 保存路径（可选）"}},
      "required": ["stress_pairs"]}},
     {"name": "labmate_fit_lite",
-     "description": "快速最小二乘拟合：linear/poly（degree）、power、exp，返回表达式与 R²。物理约束拟合请用 lmfit。",
+     "description": "快速最小二乘拟合：linear/poly（degree）、power、exp、multi（多元线性回归：系数 t 检验 + R² + 调整 R² + 整体 F 检验），返回表达式与 R²。物理约束拟合请用 lmfit。",
      "inputSchema": {"type": "object", "properties": {
-         "x": {"type": "array"}, "y": {"type": "array"},
-         "model": {"type": "string", "description": "linear|power|exp"},
+         "x": {"type": "array", "description": "multi 时支持 [x1数组, x2数组, ...]（每个与 y 等长）或每行一个样本（自动转置）"},
+         "y": {"type": "array"},
+         "model": {"type": "string", "description": "linear|power|exp|multi（多元线性回归）"},
          "degree": {"type": "integer"}},
      "required": ["x", "y"]}},
     {"name": "labmate_deps",

@@ -7,6 +7,8 @@ description: 数据拟合与参数反演工具（基于 lmfit）。当用户给�
 
 依赖：`pip install lmfit`（自带 numpy/scipy 依赖）
 
+**先查零依赖通道**：多元线性回归（多因素 → 单响应，如"强度 ~ 水胶比 + 龄期 + 掺量"）不必装 lmfit，直接调 MCP 工具 `labmate_fit_lite` 的 `model=multi`——内置系数 t 检验、调整 R²、整体 F 检验（纯标准库实现）。`x` 传 `[x1数组, x2数组, ...]`（每个与 y 等长）或每行一个样本（自动转置）。本 skill 的 lmfit 流程适合：非线性本构、物理边界约束、参数不确定性。
+
 [lmfit](https://lmfit.github.io/lmfit-py/) 相比 scipy.optimize 的优势：**命名参数 + 物理边界约束 + 完整的不确定性报告**——科研拟合要的三样都有。
 
 ## 常用模型速查（力学场景）
