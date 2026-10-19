@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.5（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域） |
+| 版本 | 0.4.6（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合） |
 | 日期 | 2026-10-20 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -211,6 +211,19 @@
 
 ---
 
+### P9（0.4.6 · 疲劳数据法定动作：S-N 拟合与寿命预测，仍 19 工具）
+
+**复核结论**：P7 的 outlier/weibull 打开了"强度数据法定报告动作"的先例，疲劳试验的同款标准动作是 S-N 曲线：轴向疲劳/旋转弯曲试验的 (应力, 寿命) 数据要拟合成 Basquin 方程 σᵃ·N=C，再按工作应力反算寿命——这是疲劳报告的法定内容，此前用户只能手工作图或拖 Excel（正是调研 2.2 指出的转录错误高发区）。0.4.6 不新增工具，`labmate_stats` 加 action=sn（与 outlier/weibull 并列，同属"强度数据法定报告动作"心智），完全复用现有 `_polyfit` 一阶回归与 weibull 的 R² 算法，零新数学代码路径。
+
+| # | 增强 | 覆盖刚需 | 零依赖实现要点 |
+|---|---|---|---|
+| 12+ | `labmate_stats` 加 `action=sn` | 疲劳试验报告法定动作（S-N 曲线拟合 + 给定应力寿命预估） | Basquin σᵃ·N=C 双对数线性化（x=ln σ、y=ln N，一阶回归：a=−斜率、C=e^截距）；target_stress 给定应力预测 N=C·σ^(−a)，超出试验范围明示"外推仅供量级参考"；边界全拦截：等长/全正（ln 定义域）/n≥3/传反（a≤0，寿命随应力升而升即数据不成立）/退化（无波动）；量级感内建（钢典型 3~10、铝合金 5~15，异常先查数据）；runout（未断试样）不能混入的专业警示与适用域（中高周 10³–10⁷，低周走 Coffin-Manson 应变法） |
+| skill 补充 | `labmate-fracture` 加 S-N 行 + 主路由加行 | 疲劳领域引导闭环 | 核心任务表加"labmate_stats action=sn"行，与 Paris/临界裂纹并列成完整疲劳评估链（裂纹起始寿命走 S-N，扩展寿命走 Paris） |
+
+**验收**：十套单测 487 项全绿（v10 新增 36 项：黄金用例 C=1e12、a=3 精确反解——N=C·σ^(−a) 零噪声构造，回归**精确还原 a=3/C=1e12/R²=1，预测 σ=250 → N=64000 cycles 精确**（1e12/250³ 手工可验）；确定性 ±3% 扰动 6 点用例 a 还原 5.01477、R²=0.999886；边界十四项：缺 stress/缺 cycles/不等长/n<3/应力含 0/寿命含负/传反/退化/target_stress≤0/外推明示/未知 action 尾串/weibull 旧路径不受影响（stress 单值语义两用））。一次通过无返工。
+
+---
+
 ## 7. 架构升级方案
 
 ```
@@ -219,7 +232,7 @@ labmate/
 │   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite / deps
 │   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分；0.4.5 增 spectrum FFT 频谱）
 │   ├─ 绘图组：plot / curve（0.4.2 SVG 出图 + 曲线特征；0.4.3 bar 柱状 + batch 批量）
-│   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度）/ errors / doe（0.4 新增）
+│   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度；0.4.6 增 sn S-N 疲劳拟合）/ errors / doe（0.4 新增）
 │   ├─ 写作组：tex / bibtex（0.4 新增）
 │   ├─ 文献组：arxiv / cite / search（0.3 多源聚合）
 │   └─ 本地组：pdf（0.3 零依赖 PDF 接地）

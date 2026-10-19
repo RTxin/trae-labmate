@@ -17,6 +17,7 @@ description: 断裂力学与疲劳裂纹扩展专项。当用户提到应力强�
 | Paris 参数 C、m | `labmate_fit_lite` model=power | da/dN = C(ΔK)^m，对 (ΔK, da/dN) 数据做幂律拟合，log-log 斜率即 m |
 | 剩余寿命积分 | 一次性脚本（解析积分） | N = ∫da/[C(ΔK(a))^m]；m≠2 与 m=2 闭式不同，脚本里分情况 |
 | K_IC 试验有效性 | handcalc | ASTM E399：B ≥ 2.5(K_IC/σ_y)² 且 a ≥ 同值，否则结果只能叫 K_Q |
+| S-N 曲线拟合与寿命预测 | `labmate_stats` action=sn | Basquin σᵃ·N=C 双对数回归出指数 a/系数 C；`target_stress` 给定应力预测寿命；runout（未断试样）不能混入，低周（<10³）走 Coffin-Manson 应变法 |
 | 塑性区/小范围屈服 | handcalc | r_p ≈ (1/2π)(K/σ_y)²（平面应力）；r_p 远小于 a 与韧带时 LEFM 才成立 |
 
 ## 代码模板

@@ -15,7 +15,7 @@ labmate/
 ├── .trae-plugin/plugin.json          # 插件清单（skills + MCP server 声明）
 ├── bin/
 │   ├── labmate_server.py             # MCP 计算引擎（Python 零依赖，十九件套）
-│   ├── test_server.py / test_server_v02.py / test_server_v03.py / test_server_v04.py / test_server_v05.py / test_server_v06.py / test_server_v07.py / test_server_v08.py / test_server_v09.py  # 全量单测
+│   ├── test_server.py / test_server_v02.py / test_server_v03.py / test_server_v04.py / test_server_v05.py / test_server_v06.py / test_server_v07.py / test_server_v08.py / test_server_v09.py / test_server_v10.py  # 全量单测
 ├── skills/
 │   ├── labmate/            # 主 skill：MCP 工具优先级 + 任务路由 + 工作流原则
 │   ├── labmate-consult/    # 试验咨询引导协议（识图/参数补全/量级校核）
@@ -32,10 +32,10 @@ labmate/
 └── README.md
 ```
 
-**两层分工**：`bin/labmate_server.py` 是"手"——MCP 计算引擎（v0.4.5，十九件套，全部零第三方依赖，纯标准库可跑）：
+**两层分工**：`bin/labmate_server.py` 是"手"——MCP 计算引擎（v0.4.6，十九件套，全部零第三方依赖，纯标准库可跑）：
 
 - 计算/本地组（完全离线）：`labmate_convert` 单位换算、`labmate_handcalc` 三段式计算排版（AST 白名单安全求值，**fmt=latex 直接输出可贴 Overleaf 的 align\* 推导**）、`labmate_mohr` Mohr 圆+包络+SVG、`labmate_fit_lite` 内置最小二乘、`labmate_table` 本机 CSV/**Excel(.xlsx)** 数据体检（只读不写，美式/欧式/科学计数数字通吃；xlsx 零依赖解析 zipfile+XML：多工作表选择、稀疏空位防列错位、sharedStrings 富文本、日期序列号转 ISO）、`labmate_style` 期刊绘图样式（ieee/nature/science/中文期刊）、`labmate_deps` 科学栈体检、**`labmate_pdf` 本地 PDF 零依赖处理（stats 体检/extract 按页提取/search 关键词页码溯源，扫描版诚实诊断，数据不出本机）**
-- 统计组（零依赖精确 p 值，与 scipy 对表验证）：**`labmate_stats` 统计推断（t 检验单样本/Welch/配对、ANOVA+η²、Jarque-Bera 正态性、t 置信区间、样本量功效估算；outlier 异常值剔除——GB/T 4883 格拉布斯 t 精确临界+狄克松国标表，歧离值/统计离群值两级判定、迭代剔除；weibull 脆性强度分析——中位秩线性回归出模数 m/特征强度 σ₀/B10/给定应力破坏概率）**、**`labmate_errors` GUM 不确定度传播（公式合成 u_c+k=2 扩展、各分量贡献占比）与回归参数 95%CI**、**`labmate_doe` 实验设计（素数域 GF(p) 生成 L4-L32 正交表，正交性有数学保证；全因子；拉丁超立方分层抽样）**
+- 统计组（零依赖精确 p 值，与 scipy 对表验证）：**`labmate_stats` 统计推断（t 检验单样本/Welch/配对、ANOVA+η²、Jarque-Bera 正态性、t 置信区间、样本量功效估算；outlier 异常值剔除——GB/T 4883 格拉布斯 t 精确临界+狄克松国标表，歧离值/统计离群值两级判定、迭代剔除；weibull 脆性强度分析——中位秩线性回归出模数 m/特征强度 σ₀/B10/给定应力破坏概率；sn S-N 疲劳拟合——Basquin σᵃ·N=C 双对数回归出指数 a/系数 C，给定应力预测疲劳寿命，外推明示，runout 警示）**、**`labmate_errors` GUM 不确定度传播（公式合成 u_c+k=2 扩展、各分量贡献占比）与回归参数 95%CI**、**`labmate_doe` 实验设计（素数域 GF(p) 生成 L4-L32 正交表，正交性有数学保证；全因子；拉丁超立方分层抽样）**
 - 数据/写作组（完全离线）：**`labmate_signal` 试验曲线信号处理（移动平均/Savitzky-Golay 保峰形平滑、线性插值不外推、梯形/Simpson 精确积分、均匀重采样；spectrum FFT 频谱——radix-2 零依赖实现，非二次幂自动零填充并明示，单边幅值谱+频率分辨率 Δf/Nyquist/主峰定位，振动测试的固有频率识别不再依赖 MATLAB）**、**`labmate_plot` 论文级 SVG 绘图（零依赖手写 SVG：折线/散点/误差棒/分组柱状、双组对比、对数轴、1-2-5 优雅刻度、图例框；bar 柱状支持类别轴、双系列并列与误差帽，可直接另存 .svg 嵌入论文）**、**`labmate_curve` 试验曲线特征提取（弹性模量 E 初始段回归+R²、0.2% 偏移屈服强度线性插值交点、峰值强度、断裂末点、总能量 Simpson/梯形自动选择；batch 模式平行试样批量出均值±标准差汇总——拉伸/压缩/直剪曲线一键出报告）**、**`labmate_tex` LaTeX 写作生成（booktabs 三线表 CSV 直读+数值列自动右对齐、多图自动 subfigure、带编号公式）**、**`labmate_bibtex` 参考文献库工作台（缺字段/重复 key/DOI 体检、跨库去重合并、按年/作者重排）**
 - 文献组（标准库 urllib）：`labmate_arxiv` arXiv 真实检索、`labmate_cite` Crossref DOI→真实 BibTeX（杜绝幻觉引用，撞 key 自动加 a/b 后缀）、**`labmate_search` 多源聚合（arXiv+Crossref+OpenAlex 线程并发+DOI/标题双策略跨源去重，单源失败自动降级并给诊断，支持年份过滤）**
 

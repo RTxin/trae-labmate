@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.4.5 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.4.6 · 十九件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -22,6 +22,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | **统计分析**（t 检验/ANOVA/正态性/置信区间/样本量） | `labmate_stats` | 零依赖精确 p 值 + Cohen's d/η² 效应量 |
 | **异常值剔除**（GB/T 4883 格拉布斯/狄克松） | `labmate_stats` | action=outlier：歧离值（0.05 检出，保留）与统计离群值（0.01 剔除）两级判定，迭代剔除逐轮重查临界值 |
 | **脆性强度 Weibull 分析** | `labmate_stats` | action=weibull：中位秩线性回归出模数 m/特征强度 σ₀/B10，stress 参数给破坏概率 |
+| **S-N 疲劳拟合与寿命预测** | `labmate_stats` | action=sn：Basquin σᵃ·N=C 双对数回归出指数 a/系数 C，target_stress 给定应力预测疲劳寿命（中高周） |
 | **不确定度分析**（GUM 传播 / 回归参数 CI） | `labmate_errors` | 公式代入合成 u_c、k=2 扩展不确定度；斜率截距 95%CI |
 | **实验设计**（正交表/全因子/拉丁超立方） | `labmate_doe` | 素数域生成 L4-L32 标准正交表，正交性有数学保证 |
 | **LaTeX 写作生成**（三线表/图环境/公式） | `labmate_tex` | booktabs 三线表 CSV 直读、多图自动 subfigure |
@@ -54,6 +55,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 要论文可用的图表 | `labmate-plot` |
 | 岩石力学/岩土工程专项（RMR、Hoek-Brown、Mohr-Coulomb） | `labmate-rockmech` |
 | 裂纹/断裂韧性/疲劳扩展（K、K_IC、Paris、临界裂纹） | `labmate-fracture` |
+| S-N 曲线拟合、给定应力下的疲劳寿命预估 | `labmate-stats`（stats · sn 节）+ `labmate-fracture` |
 | 振动信号/频谱分析/固有频率/采样率与混叠 | `labmate-vibration` |
 | 投稿/终稿前检查、AI 使用披露声明 | `labmate-disclosure` |
 | 多个类型组合 | 依次调用相关模块，consult 类补全信息永远最先 |

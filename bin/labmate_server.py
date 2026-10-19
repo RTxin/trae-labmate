@@ -8,7 +8,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.2 · 十九件套）：
+工具（0.4.6 · 十九件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
@@ -18,6 +18,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   统计组（零依赖，t/F/卡方分布精确尾概率）：
   labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA / JB 正态性 / 置信区间 / 样本量
                    异常值剔除(GB/T 4883 格拉布斯/狄克松，歧离值与统计离群值两级判定) / Weibull 强度分析
+                   S-N 疲劳拟合(Basquin σ^a·N=C 双对数回归，给定应力预测寿命)
   设计组（零依赖）：
   labmate_doe       正交表(L4~L32/L9/L27/L25，素数域生成) / 全因子 / 拉丁超立方
   labmate_signal    移动平均与 Savitzky-Golay 平滑 / 线性插值 / 梯形与 Simpson 积分 / 重采样
@@ -63,7 +64,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.5"
+SERVER_VERSION = "0.4.6"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -1704,7 +1705,7 @@ def _weibull_fit(xs):
     return m, s0, 1.0 - ssr / sst
 
 def tool_stats(args):
-    """统计分析：describe / ttest / anova / normality / ci / power / outlier / weibull。"""
+    """统计分析：describe / ttest / anova / normality / ci / power / outlier / weibull / sn。"""
     action = str(args.get("action", "describe")).lower()
     alpha = float(args.get("alpha", 0.05))
 
@@ -1975,7 +1976,52 @@ def tool_stats(args):
         lines.append("（n < 8 时 m 的估计误差大；未建模体积效应——不同尺寸试件的结果不能直接换算）")
         return "\n".join(lines)
 
-    return "❌ 未知 action：%s（支持 describe / ttest / anova / normality / ci / power / outlier / weibull）" % action
+    if action == "sn":
+        # Basquin 方程 σ^a·N = C → ln N = ln C − a·ln σ，双对数一阶回归（复用 _polyfit）
+        ss, nc = vals("stress"), vals("cycles")
+        if ss is None or nc is None:
+            return "❌ sn 需要 stress（疲劳应力数组）与 cycles（对应寿命数组）"
+        if len(ss) != len(nc):
+            return "❌ stress 与 cycles 需等长（每级应力对应一个寿命）"
+        if len(ss) < 3:
+            return "❌ S-N 拟合至少需要 3 对（应力, 寿命）数据"
+        if any(v <= 0 for v in ss) or any(v <= 0 for v in nc):
+            return "❌ Basquin 拟合要求应力、寿命全部为正（双对数定义域）"
+        lx = [math.log(v) for v in ss]
+        ly = [math.log(v) for v in nc]
+        coef = _polyfit(lx, ly, 1)
+        if coef is None:
+            return "❌ 数据退化（应力水平无波动），无法拟合"
+        b0, b1 = coef
+        a_exp = -b1
+        if a_exp <= 0:
+            return "❌ 拟合出 a ≤ 0：S-N 规律不成立（寿命应随应力升高而降低），检查 stress/cycles 是否传反"
+        C = math.exp(b0)
+        my = sum(ly) / len(ly)
+        sst = sum((v - my) ** 2 for v in ly)
+        if sst <= 0:
+            return "❌ 数据退化（寿命无波动），无法拟合"
+        ssr = sum((y - (b0 + b1 * x)) ** 2 for x, y in zip(lx, ly))
+        r2 = 1.0 - ssr / sst
+        lines = ["**S-N 疲劳拟合（Basquin σ^a·N = C，双对数线性回归，n = %d）**" % len(ss),
+                 "- 疲劳强度指数 a = %s（钢典型 3~10、铝合金 5~15，量级异常先查数据）" % _fmt(a_exp),
+                 "- 疲劳强度系数 C = %s" % _fmt(C),
+                 "- 线性化 R² = %s（< 0.9 时慎用外推）" % _fmt(r2),
+                 "- 方程：N = %s · σ^(−%s)" % (_fmt(C), _fmt(a_exp))]
+        if args.get("target_stress") is not None:
+            ts = float(args["target_stress"])
+            if ts <= 0:
+                return "❌ target_stress 须为正应力值"
+            n_pred = C * math.pow(ts, -a_exp)
+            lines.append("- 预测：σ = %s → 疲劳寿命 N ≈ %s cycles" % (_fmt(ts), _fmt(n_pred)))
+            if ts < min(ss) or ts > max(ss):
+                lines.append("⚠ 目标应力 %s 超出试验范围 [%s, %s]：外推仅供量级参考"
+                             % (_fmt(ts), _fmt(min(ss)), _fmt(max(ss))))
+        lines.append("（Basquin 适用中高周疲劳约 10³–10⁷ cycles，低周疲劳走应变法 Coffin-Manson；"
+                     "runout（未断试样）不能混入拟合）")
+        return "\n".join(lines)
+
+    return "❌ 未知 action：%s（支持 describe / ttest / anova / normality / ci / power / outlier / weibull / sn）" % action
 
 # ======================================================================
 # 8. 不确定度与误差传播（GUM 一阶，AST 数值偏导）
@@ -3275,9 +3321,9 @@ TOOLS = [
          "max_mb": {"type": "number", "description": "文件大小上限 MB，默认 50"}},
      "required": ["pdf_path"]}},
     {"name": "labmate_stats",
-     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算 / outlier 异常值检验（GB/T 4883 格拉布斯 t 精确临界 + 狄克松查表，歧离值/统计离群值两级判定，迭代剔除）/ weibull 强度分析（中位秩线性回归：模数 m、特征强度 σ₀、B10、给定应力破坏概率）。",
+     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算 / outlier 异常值检验（GB/T 4883 格拉布斯 t 精确临界 + 狄克松查表，歧离值/统计离群值两级判定，迭代剔除）/ weibull 强度分析（中位秩线性回归：模数 m、特征强度 σ₀、B10、给定应力破坏概率）/ sn S-N 疲劳拟合（Basquin σ^a·N=C 双对数回归：指数 a、系数 C，target_stress 给定应力预测疲劳寿命）。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power|outlier|weibull"},
+         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power|outlier|weibull|sn"},
          "data": {"type": "array", "description": "describe/normality/ci/outlier/weibull 的样本数组"},
          "a": {"type": "array", "description": "ttest 第一组"},
          "b": {"type": "array", "description": "ttest 第二组；不给则对 a 做 mu 单样本检验"},
@@ -3291,7 +3337,9 @@ TOOLS = [
          "sd": {"type": "number", "description": "power：合并标准差"},
          "power": {"type": "number", "description": "power：目标功效，默认 0.8"},
          "criterion": {"type": "string", "description": "outlier：grubbs（默认，n 不限）| dixon（n ≤ 30）"},
-         "stress": {"type": "number", "description": "weibull：给定应力，返回破坏概率与存活率"}},
+         "stress": {"type": "number", "description": "weibull：给定应力算破坏概率；sn：疲劳应力数组 S（与 cycles 等长）"},
+         "cycles": {"type": "array", "description": "sn：与 stress 对应的疲劳寿命数组 N"},
+         "target_stress": {"type": "number", "description": "sn：给定应力幅，预测疲劳寿命"}},
      "required": ["action"]}},
     {"name": "labmate_errors",
      "description": "不确定度分析（GUM）：propagate 一阶合成不确定度（公式+各分量贡献+k=2 扩展）/ regress OLS 斜率截距 95% 置信区间。",
