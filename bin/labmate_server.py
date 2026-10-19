@@ -61,7 +61,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.2"
+SERVER_VERSION = "0.4.3"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -2531,11 +2531,13 @@ def _plot_domain(vals, log):
 def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
     """
     论文级 SVG 坐标图：白底黑字衬线、浅灰网格、坐标框、图例框。
-    series: [{x, y, y_err(可None), color, mode(line|scatter|errorbar), name}]
+    series: [{x, y, y_err(可None), color, mode(line|scatter|errorbar|bar), name}]
+    mode=bar 时用 cats（组名列表）替代 x，画分组并列柱 + 可选误差帽。
     返回 (svg 文本, 各系列摘要行列表)。
     """
     ML, MR, MT, MB = 66, 26, 40, 58          # 左右上下边距（含刻度/轴标签空间）
-    allx = [v for s in series for v in s["x"]]
+    cat_mode = bool(series[0].get("cats"))   # bar：x 为类别轴
+    allx = [v for s in series for v in (s.get("x") or [])]
     ally = []
     for s in series:
         if s.get("y_err"):
@@ -2543,10 +2545,17 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
             ally.extend(v - e for v, e in zip(s["y"], s["y_err"]))
         else:
             ally.extend(s["y"])
-    xd0, xd1 = _plot_domain(allx, log_x)
-    yd0, yd1 = _plot_domain(ally, log_y)
+    if cat_mode:                              # 柱状图：无 x 数值域，y 域强制含 0 基线（log 轴除外）
+        xd0 = xd1 = 0.0
+        yd0, yd1 = _plot_domain(ally + ([] if log_y else [0.0]), log_y)
+    else:
+        xd0, xd1 = _plot_domain(allx, log_x)
+        yd0, yd1 = _plot_domain(ally, log_y)
+    ngroups = len(series[0]["cats"]) if cat_mode else 0
 
     def PX(v):
+        if cat_mode:                          # v 为组序号 → 组中心横坐标
+            return ML + (v + 0.5) / ngroups * (w - ML - MR)
         u = (math.log10(v) if log_x else v) - xd0
         u = min(max(u / (xd1 - xd0), 0.0), 1.0)
         return ML + u * (w - ML - MR)
@@ -2556,14 +2565,25 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
         u = min(max(u / (yd1 - yd0), 0.0), 1.0)
         return h - MB - u * (h - MT - MB)
 
-    xticks = (_log_ticks(10.0 ** xd0, 10.0 ** xd1) if log_x
-              else _nice_ticks(xd0, xd1))
+    xticks = ([] if cat_mode else
+              (_log_ticks(10.0 ** xd0, 10.0 ** xd1) if log_x
+               else _nice_ticks(xd0, xd1)))
     yticks = (_log_ticks(10.0 ** yd0, 10.0 ** yd1) if log_y
               else _nice_ticks(yd0, yd1))
 
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" '
              'font-family="Georgia, \'Times New Roman\', serif">' % (w, h)]
     parts.append('<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>' % (w, h))
+    if cat_mode:                              # 类别名 + 带间浅灰分界线（不画数值刻度）
+        for g in range(ngroups):
+            if g:
+                gx = ML + g / ngroups * (w - ML - MR)
+                parts.append('<line x1="%.2f" y1="%d" x2="%.2f" y2="%d" stroke="#efefef" stroke-width="1"/>'
+                             % (gx, MT, gx, h - MB))
+            cname = str(series[0]["cats"][g])
+            cname = cname if len(cname) <= 10 else cname[:9] + "…"
+            parts.append('<text x="%.2f" y="%d" font-size="11" fill="#333" text-anchor="middle">%s</text>'
+                         % (PX(g), h - MB + 17, _xml_escape(cname)))
     for tv in xticks:
         gx = PX(tv)
         parts.append('<line x1="%.2f" y1="%d" x2="%.2f" y2="%d" stroke="#e4e4e4" stroke-width="1"/>'
@@ -2576,7 +2596,7 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
                      % (ML, gy, w - MR, gy))
         parts.append('<text x="%d" y="%.2f" font-size="11" fill="#333" text-anchor="end">%s</text>'
                      % (ML - 8, gy + 4, _xml_escape(_tick_label(tv))))
-    if not log_x and xd0 <= 0 <= xd1:       # 零基线加深（线性轴）
+    if not log_x and not cat_mode and xd0 <= 0 <= xd1:   # 零基线加深（线性轴）
         parts.append('<line x1="%.2f" y1="%d" x2="%.2f" y2="%d" stroke="#b8b8b8" stroke-width="1"/>'
                      % (PX(0.0), MT, PX(0.0), h - MB))
     if not log_y and yd0 <= 0 <= yd1:
@@ -2585,10 +2605,31 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
     parts.append('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#333" stroke-width="1.2"/>'
                  % (ML, MT, w - ML - MR, h - MT - MB))
     summary = []
-    for s in series:
+    nser = len(series)
+    for si, s in enumerate(series):
+        col, mode = s["color"], s["mode"]
+        name = s.get("name") or "系列%d" % (si + 1)
+        if mode == "bar":                     # 分组并列柱 + 可选误差帽
+            band = (w - ML - MR) / float(ngroups)
+            bw = band * 0.56 / nser           # 柱宽：带宽的 56% 均分给各系列
+            for g, v in enumerate(s["y"]):
+                xx = PX(g) + (si - (nser - 1) / 2.0) * (bw + band * 0.04)
+                y0 = h - MB if log_y else PY(0.0)   # log 轴无 0 基线：柱底落在绘图区底边
+                y1 = PY(v)
+                parts.append('<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>'
+                             % (xx - bw / 2, min(y0, y1), bw, abs(y1 - y0), col))
+                if s.get("y_err"):
+                    ee = s["y_err"][g]
+                    yt, yb = PY(v + ee), PY(v - ee)
+                    parts.append('<line x1="%.2f" y1="%.2f" x2="%.2f" y2="%.2f" stroke="%s" stroke-width="1.1"/>'
+                                 % (xx, yt, xx, yb, col))
+                    for yg in (yt, yb):
+                        parts.append('<line x1="%.2f" y1="%.2f" x2="%.2f" y2="%.2f" stroke="%s" stroke-width="1.1"/>'
+                                     % (xx - 4, yg, xx + 4, yg, col))
+            summary.append("%s：%d 组" % (name, len(s["y"])))
+            continue
         idx = _decimate_idx(len(s["x"]))
         pts = [(s["x"][i], s["y"][i]) for i in idx]
-        col, mode = s["color"], s["mode"]
         if s.get("y_err"):                   # 误差棒：竖线 + 端帽
             for i in idx:
                 xx, yy, ee = s["x"][i], s["y"][i], s["y_err"][i]
@@ -2605,7 +2646,6 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
             pstr = " ".join("%.2f,%.2f" % (PX(xx), PY(yy)) for xx, yy in pts)
             parts.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="1.6"/>'
                          % (pstr, col))
-        name = s.get("name") or "系列%d" % (series.index(s) + 1)
         summary.append("%s：%d 点%s" % (name, len(s["x"]),
                      "（抽稀至 %d 点绘制）" % len(idx) if len(idx) < len(s["x"]) else ""))
     shown = [s for s in series if s.get("name")]
@@ -2619,6 +2659,8 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
             yy = by + 14 + 20 * k
             if s["mode"] == "scatter":
                 parts.append('<circle cx="%d" cy="%d" r="3.2" fill="%s"/>' % (bx + 16, yy - 4, s["color"]))
+            elif s["mode"] == "bar":
+                parts.append('<rect x="%d" y="%d" width="16" height="10" fill="%s"/>' % (bx + 8, yy - 9, s["color"]))
             else:
                 parts.append('<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s" stroke-width="1.8"/>'
                             % (bx + 8, yy - 4, bx + 24, yy - 4, s["color"]))
@@ -2639,8 +2681,10 @@ def _svg_axes_plot(series, title, xlabel, ylabel, log_x, log_y, w=600, h=420):
 
 def tool_plot(args):
     action = str(args.get("action", "line")).lower()
+    if action == "bar":
+        return _plot_bar(args)
     if action not in ("line", "scatter", "errorbar"):
-        return "❌ action 支持 line（默认折线）/ scatter（散点）/ errorbar（折线+误差棒）"
+        return "❌ action 支持 line（默认折线）/ scatter（散点）/ errorbar（折线+误差棒）/ bar（分组柱状）"
     x1 = [float(v) for v in (args.get("x") or [])]
     y1 = [float(v) for v in (args.get("y") or [])]
     if not x1 or len(x1) != len(y1):
@@ -2676,14 +2720,20 @@ def tool_plot(args):
     if has2:
         series.append({"x": x2, "y": y2, "y_err": None,
                         "color": _PLOT_COLORS[1], "mode": action, "name": name2})
+    return _plot_render(series, args, action,
+                        args.get("xlabel") or "（未命名）",
+                        args.get("ylabel") or "（未命名）", log_x, log_y)
+
+
+def _plot_render(series, args, action, x_desc, y_desc, log_x, log_y):
+    """出图公共尾部：SVG 引擎调用 + 摘要 + 存图 + 代码块（四种 action 共用）。"""
     svg, sums = _svg_axes_plot(series, args.get("title") or "",
                                args.get("xlabel") or "", args.get("ylabel") or "",
                                log_x, log_y)
-    xlabel, ylabel = args.get("xlabel") or "（未命名）", args.get("ylabel") or "（未命名）"
     lines = ["**论文级 SVG 绘图（零依赖，600×420 单栏尺寸）**"]
     lines.append("- 类型：%s｜%s" % (action, " + ".join(sums)))
     lines.append("- X 轴：%s（%s）｜Y 轴：%s（%s）"
-                 % (xlabel, "对数" if log_x else "线性", ylabel, "对数" if log_y else "线性"))
+                 % (x_desc, "对数" if log_x else "线性", y_desc, "对数" if log_y else "线性"))
     save = args.get("save_path")
     if save:
         try:
@@ -2700,29 +2750,50 @@ def tool_plot(args):
                  "LaTeX 用 svg 宏包 \\includesvg 排版；也可交给 AI 继续改样式。")
     return "\n".join(lines)
 
-def tool_curve(args):
-    action = str(args.get("action", "features")).lower()
-    if action != "features":
-        return "❌ action 当前支持 features（曲线特征提取）"
-    xs = [float(v) for v in (args.get("x") or [])]
-    ys = [float(v) for v in (args.get("y") or [])]
-    if len(xs) != len(ys):
-        return "❌ x/y 需等长（当前 %d / %d）" % (len(xs), len(ys))
-    if len(xs) < 4:
-        return "❌ 至少 4 个点（弹性段回归 + 偏移交点插值都需要余量）"
-    pts = sorted(zip(xs, ys))
-    if any(pts[i][0] == pts[i - 1][0] for i in range(1, len(pts))):
-        return "❌ x 存在重复值"
-    px, py = [p[0] for p in pts], [p[1] for p in pts]
+
+def _plot_bar(args):
+    """action=bar：分组柱状图——各配合比/处理组对比（双系列并列 + 可选误差帽）。"""
+    cats = [str(c) for c in (args.get("x") or [])]
+    y1 = [float(v) for v in (args.get("y") or [])]
+    if not cats or len(cats) != len(y1):
+        return "❌ bar 的 x 为组名列表（字符串），需与 y 等长且非空"
+    x2 = [str(c) for c in (args.get("x2") or [])]
+    y2 = [float(v) for v in (args.get("y2") or [])]
+    has2 = bool(x2 or y2)
+    if has2 and (not x2 or len(x2) != len(y2) or len(x2) != len(cats)):
+        return "❌ bar 双系列：x2/y2 需成对给出且与第一组同为 %d 组" % len(cats)
+    yerr = [float(v) for v in (args.get("y_err") or [])]
+    if yerr and len(yerr) != len(y1):
+        return "❌ y_err 长度 %d ≠ y 长度 %d" % (len(yerr), len(y1))
+    if yerr and any(e < 0 for e in yerr):
+        return "❌ y_err 需为非负（± 幅值）"
+    log_y = bool(args.get("log_y"))
+    if log_y:
+        yv = list(y1) + list(y2)
+        if yerr:
+            yv += [v - e for v, e in zip(y1, yerr)]
+        if min(yv) <= 0:
+            return "❌ log_y 要求所有 y（含误差下界）> 0"
+    labels = [str(v) for v in (args.get("labels") or [])]
+    name1 = labels[0] if labels and labels[0] else ("系列1" if has2 else "")
+    name2 = labels[1] if len(labels) > 1 and labels[1] else "系列2"
+    series = [{"cats": cats, "y": y1, "y_err": yerr or None,
+               "color": _PLOT_COLORS[0], "mode": "bar", "name": name1}]
+    if has2:
+        series.append({"cats": x2, "y": y2, "y_err": None,
+                       "color": _PLOT_COLORS[1], "mode": "bar", "name": name2})
+    return _plot_render(series, args, "bar",
+                        args.get("xlabel") or "类别（%d 组）" % len(cats),
+                        args.get("ylabel") or "（未命名）", False, log_y)
+
+def _curve_features(px, py, frac, off):
+    """单条曲线特征提取（px/py 已升序排序），单条与批量共用。
+    返回 (特征 dict, None) 或 (None, 错误信息)。"""
     n = len(px)
-    frac = args.get("initial_frac", 0.2)
-    frac = 0.2 if frac is None else float(frac)
-    if not 0.0 < frac <= 1.0:
-        return "❌ initial_frac 需在 (0, 1]（默认 0.2：取曲线前 20% 的 x 范围做弹性段）"
-    off = args.get("yield_offset", 0.002)
-    off = 0.002 if off is None else float(off)
-    if off < 0:
-        return "❌ yield_offset 需为非负（默认 0.002 即 0.2% 偏移）"
+    if n < 4:
+        return None, "至少 4 个点（弹性段回归 + 偏移交点插值都需要余量）"
+    if any(px[i] == px[i - 1] for i in range(1, n)):
+        return None, "x 存在重复值"
     # ── 弹性段：x ≤ xmin + frac·Δx，不足 3 点回退前 3 点 ──
     xcut = px[0] + frac * (px[-1] - px[0])
     seg = [i for i in range(n) if px[i] <= xcut]
@@ -2731,42 +2802,27 @@ def tool_curve(args):
     ex, ey = [px[i] for i in seg], [py[i] for i in seg]
     coef = _polyfit(ex, ey, 1)
     if coef is None:
-        return "❌ 弹性段拟合退化（x 无变化），请检查数据"
+        return None, "弹性段拟合退化（x 无变化），请检查数据"
     b0, a1 = coef[0], coef[1]
     ybar = sum(ey) / len(ey)
     ss_res = sum((v - (b0 + a1 * u)) ** 2 for u, v in zip(ex, ey))
     ss_tot = sum((v - ybar) ** 2 for v in ey)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-30 else 1.0
-    lines = ["**试验曲线特征（%d 点，x ∈ [%s, %s]）**" % (n, _fmt(px[0]), _fmt(px[-1]))]
-    lines.append("- 弹性段：前 %d 点（x ≤ %s，initial_frac=%s）"
-                 % (len(seg), _fmt(ex[-1]), _fmt(frac)))
-    sign = "+" if b0 >= 0 else "-"
-    lines.append("- 线性回归：y = %s·x %s %s，R² = %s"
-                 % (_fmt(a1), sign, _fmt(abs(b0)), "%.4g" % r2))
-    lines.append("- **弹性模量 E = %s**（弹性段斜率）" % _fmt(a1))
-    if a1 <= 0:
-        lines.append("  ⚠ 斜率非正：弹性段窗口可能混入非弹性数据，请调小 initial_frac 后重试")
+    feat = {"nseg": len(seg), "xcut": ex[-1], "e": a1, "b": b0, "r2": r2,
+            "yield": None, "peak_y": 0.0, "peak_x": 0.0,
+            "end": (px[-1], py[-1]), "energy": 0.0, "method": ""}
     # ── 偏移法屈服：y = E(x−off)+b 与曲线首个交点（线性插值）──
     if off > 0 and a1 > 0:
         d = [py[i] - (b0 + a1 * (px[i] - off)) for i in range(n)]
-        xy = None
         for i in range(1, n):
             if d[i - 1] > 0 and d[i] <= 0:
                 t = d[i - 1] / (d[i - 1] - d[i])
-                xy = (px[i - 1] + t * (px[i] - px[i - 1]),
-                      py[i - 1] + t * (py[i] - py[i - 1]))
+                feat["yield"] = (px[i - 1] + t * (px[i] - px[i - 1]),
+                                 py[i - 1] + t * (py[i] - py[i - 1]))
                 break
-        if xy:
-            lines.append("- **屈服强度 = %s**（%.2f%% 偏移，对应 x = %s）"
-                         % (_fmt(xy[1]), off * 100, _fmt(xy[0])))
-        else:
-            lines.append("- 偏移交点：未找到（曲线未明显屈服或数据未覆盖屈服段）")
-    else:
-        lines.append("- 偏移交点：跳过（偏移量为 0 或斜率非正）")
-    # ── 峰值 / 末点 / 总能量 ──
+    # ── 峰值 / 能量 ──
     ymax = max(py)
-    lines.append("- **峰值强度 = %s**（x = %s）" % (_fmt(ymax), _fmt(px[py.index(ymax)])))
-    lines.append("- 末点（断裂/卸载）：x = %s，y = %s" % (_fmt(px[-1]), _fmt(py[-1])))
+    feat["peak_y"], feat["peak_x"] = ymax, px[py.index(ymax)]
     segs = n - 1
     energy, method = None, ""
     if segs % 2 == 0:
@@ -2777,7 +2833,115 @@ def tool_curve(args):
     if energy is None:
         energy = sum((px[i + 1] - px[i]) * (py[i] + py[i + 1]) / 2 for i in range(segs))
         method = "梯形法，%d 段（间距不等，Simpson 不适用）" % segs
-    lines.append("- **总能量（曲线下面积）= %s**（%s）" % (_fmt(energy), method))
+    feat["energy"], feat["method"] = energy, method
+    return feat, None
+
+def _curve_ms(vals):
+    """均值 ± 样本标准差（n=1 时 std=0），批量汇总用。
+    相对 1e-12 以下的标准差视为浮点求和噪声归零（如 sum([0.4]*3)≠1.2 产生的 6.8e-17 伪精度）。"""
+    m = sum(vals) / len(vals)
+    if len(vals) == 1:
+        return m, 0.0
+    sd = math.sqrt(sum((v - m) ** 2 for v in vals) / (len(vals) - 1))
+    if abs(sd) <= 1e-12 * max(abs(m), 1e-30):
+        sd = 0.0
+    return m, sd
+
+def _curve_batch(args, frac, off):
+    curves = args.get("curves") or []
+    if not isinstance(curves, list) or not curves:
+        return '❌ batch 需要 curves：[{"name": "A-01", "x": [...], "y": [...]}, ...]（≥1 条）'
+    lines = ["**平行试样批量特征（%d 条曲线，initial_frac=%s，偏移 %.2f%%）**"
+             % (len(curves), _fmt(frac), off * 100)]
+    rows, bad = [], []
+    for i, c in enumerate(curves):
+        if not isinstance(c, dict):
+            bad.append("第 %d 条不是对象" % (i + 1))
+            continue
+        name = str(c.get("name") or "曲线%d" % (i + 1))
+        try:
+            xs = [float(v) for v in (c.get("x") or [])]
+            ys = [float(v) for v in (c.get("y") or [])]
+        except (TypeError, ValueError):
+            bad.append("%s：x/y 含非数值" % name)
+            continue
+        if len(xs) != len(ys):
+            bad.append("%s：x/y 不等长（%d / %d）" % (name, len(xs), len(ys)))
+            continue
+        pts = sorted(zip(xs, ys))
+        feat, err = _curve_features([p[0] for p in pts], [p[1] for p in pts], frac, off)
+        if feat is None:
+            bad.append("%s：%s" % (name, err))
+            continue
+        rows.append((name, feat))
+        ytxt = _fmt(feat["yield"][1]) if feat["yield"] else "—"
+        lines.append("- **%s**（%d 点）：E = %s｜屈服 = %s｜峰值 = %s｜总能量 = %s"
+                     % (name, len(pts), _fmt(feat["e"]), ytxt,
+                        _fmt(feat["peak_y"]), _fmt(feat["energy"])))
+    if not rows:
+        return "❌ 没有任何曲线提取成功：" + "；".join(bad)
+    lines.append("\n**汇总（均值 ± 标准差，n=%d）**" % len(rows))
+    m, sd = _curve_ms([f["e"] for _, f in rows])
+    lines.append("- **弹性模量 E = %s ± %s**" % (_fmt(m), _fmt(sd)))
+    yv = [f["yield"][1] for _, f in rows if f["yield"]]
+    if yv:
+        m, sd = _curve_ms(yv)
+        lines.append("- **屈服强度 = %s ± %s**（%d/%d 条找到交点）"
+                     % (_fmt(m), _fmt(sd), len(yv), len(rows)))
+    else:
+        lines.append("- 屈服强度：均未找到偏移交点（脆性/数据未覆盖屈服段）")
+    m, sd = _curve_ms([f["peak_y"] for _, f in rows])
+    lines.append("- **峰值强度 = %s ± %s**" % (_fmt(m), _fmt(sd)))
+    m, sd = _curve_ms([f["energy"] for _, f in rows])
+    lines.append("- **总能量 = %s ± %s**" % (_fmt(m), _fmt(sd)))
+    if bad:
+        lines.append("\n⚠ %d 条已跳过：%s" % (len(bad), "；".join(bad)))
+    return "\n".join(lines)
+
+def tool_curve(args):
+    action = str(args.get("action", "features")).lower()
+    if action not in ("features", "batch"):
+        return "❌ action 当前支持 features（单条曲线）/ batch（平行试样批量）"
+    frac = args.get("initial_frac", 0.2)
+    frac = 0.2 if frac is None else float(frac)
+    if not 0.0 < frac <= 1.0:
+        return "❌ initial_frac 需在 (0, 1]（默认 0.2：取曲线前 20% 的 x 范围做弹性段）"
+    off = args.get("yield_offset", 0.002)
+    off = 0.002 if off is None else float(off)
+    if off < 0:
+        return "❌ yield_offset 需为非负（默认 0.002 即 0.2% 偏移）"
+    if action == "batch":
+        return _curve_batch(args, frac, off)
+    xs = [float(v) for v in (args.get("x") or [])]
+    ys = [float(v) for v in (args.get("y") or [])]
+    if len(xs) != len(ys):
+        return "❌ x/y 需等长（当前 %d / %d）" % (len(xs), len(ys))
+    pts = sorted(zip(xs, ys))
+    px, py = [p[0] for p in pts], [p[1] for p in pts]
+    feat, err = _curve_features(px, py, frac, off)
+    if feat is None:
+        return "❌ " + err
+    lines = ["**试验曲线特征（%d 点，x ∈ [%s, %s]）**" % (len(px), _fmt(px[0]), _fmt(px[-1]))]
+    lines.append("- 弹性段：前 %d 点（x ≤ %s，initial_frac=%s）"
+                 % (feat["nseg"], _fmt(feat["xcut"]), _fmt(frac)))
+    sign = "+" if feat["b"] >= 0 else "-"
+    lines.append("- 线性回归：y = %s·x %s %s，R² = %s"
+                 % (_fmt(feat["e"]), sign, _fmt(abs(feat["b"])), "%.4g" % feat["r2"]))
+    lines.append("- **弹性模量 E = %s**（弹性段斜率）" % _fmt(feat["e"]))
+    if feat["e"] <= 0:
+        lines.append("  ⚠ 斜率非正：弹性段窗口可能混入非弹性数据，请调小 initial_frac 后重试")
+    if feat["yield"]:
+        lines.append("- **屈服强度 = %s**（%.2f%% 偏移，对应 x = %s）"
+                     % (_fmt(feat["yield"][1]), off * 100, _fmt(feat["yield"][0])))
+    elif off > 0 and feat["e"] > 0:
+        lines.append("- 偏移交点：未找到（曲线未明显屈服或数据未覆盖屈服段）")
+    else:
+        lines.append("- 偏移交点：跳过（偏移量为 0 或斜率非正）")
+    lines.append("- **峰值强度 = %s**（x = %s）"
+                 % (_fmt(feat["peak_y"]), _fmt(feat["peak_x"])))
+    lines.append("- 末点（断裂/卸载）：x = %s，y = %s"
+                 % (_fmt(feat["end"][0]), _fmt(feat["end"][1])))
+    lines.append("- **总能量（曲线下面积）= %s**（%s）" % (_fmt(feat["energy"]), feat["method"]))
     lines.append("\n（屈服判定假设曲线有清晰上升段；R² 偏低时可调小 initial_frac 纯化弹性段，"
                  "改 yield_offset 可适配 0.1%/0.05% 偏移标准）")
     return "\n".join(lines)
@@ -2938,10 +3102,10 @@ TOOLS = [
          "n": {"type": "integer", "description": "resample：目标点数，默认 100"}},
      "required": ["y"]}},
     {"name": "labmate_plot",
-     "description": "论文级 SVG 绘图（零依赖，数据不出本机）：折线/散点/误差棒，双组数据对比、对数轴、图例、1-2-5 优雅刻度，可直接存 .svg 嵌入论文。",
+     "description": "论文级 SVG 绘图（零依赖，数据不出本机）：折线/散点/误差棒/分组柱状，双组数据对比、对数轴、图例、1-2-5 优雅刻度，可直接存 .svg 嵌入论文。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "line（默认折线）| scatter（散点）| errorbar（折线+误差棒）"},
-         "x": {"type": "array", "description": "第一组 x 数组"},
+         "action": {"type": "string", "description": "line（默认折线）| scatter（散点）| errorbar（折线+误差棒）| bar（分组柱状，x 为组名）"},
+         "x": {"type": "array", "description": "第一组 x 数组；bar 时为组名字符串数组"},
          "y": {"type": "array", "description": "第一组 y 数组"},
          "x2": {"type": "array", "description": "第二组 x（对比曲线，可选）"},
          "y2": {"type": "array", "description": "第二组 y（可选）"},
@@ -2955,11 +3119,12 @@ TOOLS = [
          "save_path": {"type": "string", "description": "SVG 保存路径（可选）"}},
      "required": ["x", "y"]}},
     {"name": "labmate_curve",
-     "description": "试验曲线特征提取（零依赖）：弹性模量 E（初始段线性回归+R²）、0.2% 偏移屈服强度（平移线与曲线交点线性插值）、峰值强度及位置、断裂末点、总能量（Simpson/梯形自动选择）。适配拉伸/压缩/直剪等 x 递增曲线。",
+     "description": "试验曲线特征提取（零依赖）：弹性模量 E（初始段线性回归+R²）、0.2% 偏移屈服强度（平移线与曲线交点线性插值）、峰值强度及位置、断裂末点、总能量（Simpson/梯形自动选择）。features 单条 / batch 平行试样批量（逐条提取+均值±标准差汇总，GB/T 类报告标准动作）。适配拉伸/压缩/直剪等 x 递增曲线。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "features（默认）"},
-         "x": {"type": "array", "description": "自变量：应变/位移/加载点变形"},
-         "y": {"type": "array", "description": "因变量：应力/荷载"},
+         "action": {"type": "string", "description": "features（默认，单条）| batch（平行试样批量）"},
+         "x": {"type": "array", "description": "自变量：应变/位移/加载点变形（features）"},
+         "y": {"type": "array", "description": "因变量：应力/荷载（features）"},
+         "curves": {"type": "array", "description": "batch：[{name, x, y}, ...] 平行试样曲线数组"},
          "initial_frac": {"type": "number", "description": "弹性段窗口（曲线前段 x 范围占比），默认 0.2"},
          "yield_offset": {"type": "number", "description": "屈服偏移量，默认 0.002（0.2%）"}},
      "required": ["x", "y"]}},
