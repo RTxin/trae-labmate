@@ -230,7 +230,7 @@ r = srv.tool_table({})
 ok("空参数仍给使用引导", "❌" in r, r)
 
 # ====================== stdio 冒烟 ======================
-print("== 26. stdio 冒烟（0.4.1 · 17 工具）==")
+print("== 26. stdio 冒烟（0.4.2 · 19 工具）==")
 def rpc(msgs):
     p = subprocess.run([sys.executable, os.path.join(HERE, "labmate_server.py")],
                        input="\n".join(msgs) + "\n", capture_output=True,
@@ -242,9 +242,9 @@ out = rpc([
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_table","arguments":{"xlsx_path":"%s"}}}' % XLSX.replace("\\", "\\\\"),
 ])
-ok("版本 0.4.1", out[0]["result"]["serverInfo"]["version"] == "0.4.1", out[0])
+ok("版本 0.4.2", out[0]["result"]["serverInfo"]["version"] == "0.4.2", out[0])
 names = [t["name"] for t in out[1]["result"]["tools"]]
-ok("tools/list = 17（xlsx 是参数扩展，不新增工具）", len(names) == 17, names)
+ok("tools/list = 19（0.4.2 新增 plot/curve）", len(names) == 19, names)
 schema = [t for t in out[1]["result"]["tools"] if t["name"] == "labmate_table"][0]["inputSchema"]["properties"]
 ok("labmate_table schema 含 xlsx_path/sheet", "xlsx_path" in schema and "sheet" in schema, schema)
 body = out[2]["result"]["content"][0]["text"]
