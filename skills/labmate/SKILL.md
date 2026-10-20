@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.4.8 · 二十件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.4.9 · 二十件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -24,11 +24,14 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | **异常值剔除**（GB/T 4883 格拉布斯/狄克松） | `labmate_stats` | action=outlier：歧离值（0.05 检出，保留）与统计离群值（0.01 剔除）两级判定，迭代剔除逐轮重查临界值 |
 | **脆性强度 Weibull 分析** | `labmate_stats` | action=weibull：中位秩线性回归出模数 m/特征强度 σ₀/B10，stress 参数给破坏概率 |
 | **S-N 疲劳拟合与寿命预测** | `labmate_stats` | action=sn：Basquin σᵃ·N=C 双对数回归出指数 a/系数 C，target_stress 给定应力预测疲劳寿命（中高周） |
+| **相关性分析**（Pearson/Spearman） | `labmate_stats` | action=corr：r 与 rs + 精确 p（复用 t 尾概率），ties 平均秩，单调非线性场景 rs 更稳健 |
+| **非参数检验**（Mann-Whitney/Kruskal-Wallis） | `labmate_stats` | action=nptest：数据不正态时的标准替代——MW 在 n₁+n₂≤20 用组合计数精确 p（大样本正态近似明示），KW 带 ties 校正与 ε² |
+| **ANOVA 事后两两比较** | `labmate_stats` | anova 加 posthoc：Tukey HSD（学生化极差分布零依赖数值积分，族错误率恰为 α）/ Holm（逐步下降）/ Bonferroni |
 | **不确定度分析**（GUM 传播 / 回归参数 CI） | `labmate_errors` | 公式代入合成 u_c、k=2 扩展不确定度；斜率截距 95%CI |
 | **实验设计**（正交表/全因子/拉丁超立方） | `labmate_doe` | 素数域生成 L4-L32 标准正交表，正交性有数学保证 |
 | **LaTeX 写作生成**（三线表/图环境/公式） | `labmate_tex` | booktabs 三线表 CSV 直读、多图自动 subfigure |
 | **Word 文档生成**（报告/论文初稿） | `labmate_docx` | 零依赖出 .docx：标题大纲（导航窗格可跳转）、正文（宋体+Times New Roman 小四、1.5 倍行距、首行缩进 2 字符）、三线表（顶/底线 1.5pt、表头线 0.5pt、无竖线，数值列自动右对齐，CSV 直读）；Word/WPS 直接打开续写 |
-| **BibTeX 库工作台**（体检/合并/排序） | `labmate_bibtex` | 跨库去重合并（DOI 优先）、缺字段体检、按年/作者重排 |
+| **BibTeX 库工作台**（体检/合并/排序/GB7714） | `labmate_bibtex` | 跨库去重合并（DOI 优先）、缺字段体检、按年/作者重排；action=gb7714 直接出 GB/T 7714-2015 参考文献表（顺序编码制/著者-出版年制，作者超 3 位截断，西文姓前名缩写） |
 | **试验曲线信号处理**（平滑/插值/积分/频谱） | `labmate_signal` | SG 保峰形滤波、Simpson 精确积分、均匀重采样；spectrum=FFT 频谱（radix-2 零依赖，非二次幂自动零填充并明示，单边幅值谱+主峰） |
 | **论文级 SVG 绘图**（折线/散点/误差棒/分组柱状） | `labmate_plot` | 零依赖出图：双组对比、对数轴、1-2-5 优雅刻度；bar 柱状图支持类别轴、双系列并列与误差帽；save_path 直接存 .svg 嵌入论文 |
 | **试验曲线特征提取**（E/屈服/峰值/能量） | `labmate_curve` | 弹性模量（初始段回归+R²）、0.2% 偏移屈服、峰值强度、总能量；batch 模式平行试样批量出均值±标准差汇总；拉伸/压缩/直剪一键出特征 |

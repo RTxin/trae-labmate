@@ -180,7 +180,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_curve",
                        "arguments": {"x": CX, "y": CY}}}])
-ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
+ok("initialize 版本 = 0.4.9", res[0]["result"]["serverInfo"]["version"] == "0.4.9", res[0])
 ok("stdio tools/list = 20", len(res[1]["result"]["tools"]) == 20, len(res[1]["result"]["tools"]))
 curve_text = res[2]["result"]["content"][0]["text"]
 ok("stdio tools/call labmate_curve 已知值不丢",

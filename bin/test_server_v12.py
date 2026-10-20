@@ -192,7 +192,7 @@ tex_r = srv.tool_tex({"action": "table", "csv_path": CSV_PATH})
 ok("labmate_tex csv_path 老路径不受抽取重构影响",
    "\\toprule" in tex_r and "S-1" in tex_r and "& 10.02 & 25.4 \\\\" in tex_r, tex_r[:200])
 main_skill = open(os.path.join(HERE, "..", "skills", "labmate", "SKILL.md"), encoding="utf-8").read()
-ok("主路由版本行 = 0.4.8", "v0.4.8" in main_skill, "")
+ok("主路由版本行 = 0.4.9", "v0.4.9" in main_skill, "")
 ok("主路由工具表含 docx 行", "labmate_docx" in main_skill, "")
 
 def rpc(msgs):
@@ -210,7 +210,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                                      "sections": [
                                          {"type": "heading", "text": "1 数据", "level": 1},
                                          {"type": "table", "csv_path": CSV_PATH}]}}}])
-ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
+ok("initialize 版本 = 0.4.9", res[0]["result"]["serverInfo"]["version"] == "0.4.9", res[0])
 txt = res[1]["result"]["content"][0]["text"]
 ok("stdio 黄金用例生成摘要", "**Word 文档已生成**" in txt and "- 表 1：2 行 × 3 列" in txt,
    txt[:200])

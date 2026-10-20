@@ -1,6 +1,6 @@
 ---
 name: labmate-writing
-description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文表格（三线表）、figure/subfigure 图环境、编号公式、BibTeX 参考文献库管理（查重/体检/合并/排序）、生成 Word 文档（.docx 报告/论文初稿）、把试验结果整理成投稿可用格式时使用。触发词：「做三线表」「生成表格」「这个表怎么排」「合并 bib 文件」「参考文献重复了」「图环境」「子图怎么排」「公式怎么编号」「生成 Word 报告」「导出 docx」。计算一律调 MCP 工具 labmate_tex / labmate_bibtex，Word 出口调 labmate_docx，不手拼 LaTeX 字符串。
+description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文表格（三线表）、figure/subfigure 图环境、编号公式、BibTeX 参考文献库管理（查重/体检/合并/排序）、GB/T 7714 中文引用格式输出、生成 Word 文档（.docx 报告/论文初稿）、把试验结果整理成投稿可用格式时使用。触发词：「做三线表」「生成表格」「这个表怎么排」「合并 bib 文件」「参考文献重复了」「GB/T 7714」「参考文献格式」「图环境」「子图怎么排」「公式怎么编号」「生成 Word 报告」「导出 docx」。计算一律调 MCP 工具 labmate_tex / labmate_bibtex / labmate_docx，不手拼 LaTeX 字符串。
 ---
 
 # LabMate · 论文写作与 LaTeX 生成（labmate-writing）
@@ -14,6 +14,7 @@ description: 论文写作与 LaTeX 生产力引导。当用户需要生成论文
 | 带编号公式（\label + \eqref 引用） | `labmate_tex`（action: equation） |
 | **Word 文档初稿**（标题大纲 + 正文 + 三线表，.docx） | `labmate_docx` |
 | .bib 库体检（缺字段/重复 key/DOI） | `labmate_bibtex`（action: check） |
+| **GB/T 7714 参考文献表**（中文论文/学位论文法定格式） | `labmate_bibtex`（action: gb7714，顺序编码制或 style="author-year"） |
 | 跨库去重合并（DOI 优先、字段互补） | `labmate_bibtex`（action: merge） |
 | 按年份/作者/ key 重排 | `labmate_bibtex`（action: merge + sort 参数） |
 

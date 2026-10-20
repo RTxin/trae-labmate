@@ -8,7 +8,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.8 · 二十件套）：
+工具（0.4.9 · 二十件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
@@ -16,7 +16,9 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   labmate_fit_lite  内置最小二乘拟合（线性/二次/指数/幂律 + 多元线性回归）+ R²
   labmate_errors    不确定度传播（GUM 一阶数值偏导）+ 线性回归参数区间
   统计组（零依赖，t/F/卡方分布精确尾概率）：
-  labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA / JB 正态性 / 置信区间 / 样本量
+  labmate_stats     描述统计 / t 检验(单样本/两样本Welch/配对) / 单因素 ANOVA(含事后检验) / 相关性
+                   (Pearson/Spearman) / 非参数检验(Mann-Whitney 精确 p/Kruskal-Wallis) / JB 正态性
+                   / 置信区间 / 样本量
                    异常值剔除(GB/T 4883 格拉布斯/狄克松，歧离值与统计离群值两级判定) / Weibull 强度分析
                    S-N 疲劳拟合(Basquin σ^a·N=C 双对数回归，给定应力预测寿命)
   设计组（零依赖）：
@@ -33,7 +35,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
   写作组（零依赖）：
   labmate_tex      LaTeX 三线表(booktabs)/图环境/公式环境生成
   labmate_docx     Word(.docx) 文档生成（零依赖 OOXML：标题大纲/正文/三线表，手工 XML + zipfile）
-  labmate_bibtex   BibTeX 库体检（必填字段/重复 key/DOI/标题）与多文件去重合并
+  labmate_bibtex   BibTeX 库体检（必填字段/重复 key/DOI/标题）与多文件去重合并 / GB/T 7714 引用输出
   文献组（标准库 urllib，需联网）：
   labmate_arxiv    arXiv 检索（官方免费 API，无需 key）
   labmate_cite     DOI → 真实元数据 + 规范 BibTeX（Crossref，杜绝幻觉引用；可对既有库 key 去重）
@@ -65,7 +67,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.8"
+SERVER_VERSION = "0.4.9"
 
 # ======================================================================
 # 1. 单位换算引擎
@@ -1727,6 +1729,99 @@ def _norm_ppf(p):
             hi = mid
     return 0.5 * (lo + hi)
 
+def _q_sf(q, k, nu):
+    """学生化极差分布 P(Q > q)（Tukey HSD 事后检验的精确 p 值，零依赖数值积分）。
+    构造：Q = range(Z₁..Z_k) / √(U/ν)，Z 为 iid N(0,1) 且独立于 U~χ²(ν)：
+      P(Q ≤ q) = ∫ χ²pdf(u;ν) · G_k(q·√(u/ν)) du，
+      G_k(r) = k·∫ φ(z)·[Φ(z+r) − Φ(z)]^(k−1) dz（k 个 iid 标准正态的极差 ≤ r）。
+    二重 Simpson（内层 256 / 外层 400 段）。精度边界（以 k=2 退化恒等式
+    P(Q≤q) = P(|t(ν)| ≤ q/√2) 对 _t_sf 锚定）：ν≥4 偏差 < 1e-4，ν≥10 < 1e-5；
+    ν=2（df_error=2，教科书 Tukey 表不列的病态场景）约 1e-3。"""
+    if q <= 0:
+        return 1.0
+    if k < 2 or nu < 2:
+        return float("nan")
+    SQ2 = math.sqrt(2.0)
+    C1 = 1.0 / math.sqrt(2.0 * math.pi)
+    lgn = _gammln(0.5 * nu) + 0.5 * nu * math.log(2.0)
+
+    def phi(z):
+        return C1 * math.exp(-0.5 * z * z)
+
+    def Phi(z):
+        return 0.5 * (1.0 + math.erf(z / SQ2))
+
+    def chi2_pdf(u):
+        if u <= 0.0:
+            return 0.0
+        return math.exp((0.5 * nu - 1.0) * math.log(u) - 0.5 * u - lgn)
+
+    def G(r):
+        # 内层：P(range ≤ r) = k·∫φ(z)·[Φ(z+r) − Φ(z)]^(k−1) dz（枚举最小值位置），
+        # z ∈ [-6, 6]（φ 尾外贡献 < 1e-9）；Simpson 256 段
+        a, m = -6.0, 256
+        h = 12.0 / m
+        s = phi(a) * (Phi(a + r) - Phi(a)) ** (k - 1)
+        s += phi(-a) * (Phi(-a + r) - Phi(-a)) ** (k - 1)
+        for i in range(1, m):
+            z = a + i * h
+            s += (4.0 if i % 2 else 2.0) * phi(z) * (Phi(z + r) - Phi(z)) ** (k - 1)
+        return k * s * h / 3.0
+
+    # 外层：χ²(ν) 的 ±7σ 覆盖区间；ν≥2 时 pdf 在 0 处有限（ν=2 为 0.5·e^{-u/2} 光滑），
+    # 下界直取 0 不钳位——钳位会砍掉左尾概率质量，k=2 恒等式当场暴露该误差
+    lo = max(0.0, nu - 7.0 * math.sqrt(2.0 * nu))
+    hi = nu + 7.0 * math.sqrt(2.0 * nu)
+    m2 = 400
+    h2 = (hi - lo) / m2
+    s2 = chi2_pdf(lo) * G(q * math.sqrt(lo / nu))
+    s2 += chi2_pdf(hi) * G(q * math.sqrt(hi / nu))
+    for i in range(1, m2):
+        u = lo + i * h2
+        s2 += (4.0 if i % 2 else 2.0) * chi2_pdf(u) * G(q * math.sqrt(u / nu))
+    p_le = s2 * h2 / 3.0
+    return max(0.0, min(1.0, 1.0 - p_le))
+
+def _mw_exact_p(u_obs, n1, n2):
+    """Mann-Whitney U 双尾精确 p（组合计数动态规划，n1+n2 ≤ 20 时用）。
+    递推：c(u; a, b) = c(u−b; a−1, b) + c(u; a, b−1)——合并样本的最大值
+    取自样本 1 时贡献 b 个胜过对，取自样本 2 时贡献 0；P(U=u) = c(u)/C(a+b, a)。
+    返回双尾 p = min(1, 2·P(U ≤ u_obs))（U 取 min(U1, U2)，分布对称）。"""
+    total = math.comb(n1 + n2, n1)
+    dp = {}
+    for a in range(n1 + 1):
+        for b in range(n2 + 1):
+            row = [0.0] * (a * b + 1)
+            if a == 0 or b == 0:
+                row[0] = 1.0
+            else:
+                prev1, prev2 = dp[(a - 1, b)], dp[(a, b - 1)]
+                for u in range(a * b + 1):
+                    c = prev2[u] if u <= a * (b - 1) else 0.0
+                    if u - b >= 0 and u - b <= (a - 1) * b:
+                        c += prev1[u - b]
+                    row[u] = c
+            dp[(a, b)] = row
+    row = dp[(n1, n2)]
+    p_le = sum(row[:u_obs + 1]) / total
+    return min(1.0, 2.0 * p_le)
+
+def _avg_ranks(vals):
+    """数值数组排秩（升序，ties 取平均秩）。"""
+    order = sorted(range(len(vals)), key=lambda i: vals[i])
+    ranks = [0.0] * len(vals)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and vals[order[j + 1]] == vals[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for t in range(i, j + 1):
+            ranks[order[t]] = avg
+        i = j + 1
+    return ranks
+
+
 def _sstd(xs):
     """样本标准差（n-1 分母）。"""
     n = len(xs)
@@ -1814,7 +1909,7 @@ def _weibull_fit(xs):
     return m, s0, 1.0 - ssr / sst
 
 def tool_stats(args):
-    """统计分析：describe / ttest / anova / normality / ci / power / outlier / weibull / sn。"""
+    """统计分析：describe / ttest / corr / anova(posthoc) / nptest / normality / ci / power / outlier / weibull / sn。"""
     action = str(args.get("action", "describe")).lower()
     alpha = float(args.get("alpha", 0.05))
 
@@ -1833,6 +1928,12 @@ def tool_stats(args):
         if p < 1e-4:
             return "p = %.2e" % p
         return "p = %.4f" % p
+
+    def pv(p):
+        """纯 p 值数字串（无前缀，事后两两比较表内嵌用）。"""
+        if p is None or math.isnan(p):
+            return "NaN"
+        return "%.2e" % p if p < 1e-4 else "%.4f" % p
 
     if action == "describe":
         xs = vals("data")
@@ -1853,8 +1954,9 @@ def tool_stats(args):
             lines.append("- 偏度 %s | 超额峰度 %s（总体矩，未做小样本校正）" %
                          (_fmt(sum((x - mean) ** 3 for x in xs) / n / m2 ** 1.5),
                           _fmt(sum((x - mean) ** 4 for x in xs) / n / m2 ** 2 - 3.0)))
-        lines.append("\n（正态性判断用 action=normality；组间比较用 ttest / anova；区间估计用 ci；"
-                     "异常值剔除用 outlier；强度散布 Weibull 用 weibull）")
+        lines.append("\n（正态性判断用 action=normality；组间比较用 ttest / anova（加 posthoc 出两两比较）/ "
+                     "nptest（非参数）；相关性用 corr；区间估计用 ci；异常值剔除用 outlier；"
+                     "强度散布 Weibull 用 weibull）")
         return "\n".join(lines)
 
     if action == "ttest":
@@ -1910,6 +2012,46 @@ def tool_stats(args):
                    _fmt((ma - mb) / sp) if sp > 0 else "N/A",
                    "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha)))
 
+    if action == "corr":
+        x, y = vals("x"), vals("y")
+        if x is None or y is None:
+            return "❌ corr 需要 x、y（两个等长数值数组，n ≥ 3）"
+        if len(x) != len(y):
+            return "❌ x、y 需等长（当前 %d vs %d）" % (len(x), len(y))
+        if len(x) < 3:
+            return "❌ 相关性检验需要 n ≥ 3"
+        n = len(x)
+        mx, my = sum(x) / n, sum(y) / n
+        sxy = sum((a - mx) * (b - my) for a, b in zip(x, y))
+        sxx = sum((a - mx) ** 2 for a in x)
+        syy = sum((b - my) ** 2 for b in y)
+        if sxx <= 0 or syy <= 0:
+            return "❌ x 或 y 无波动（方差为 0），相关系数无定义"
+        r = sxy / math.sqrt(sxx * syy)
+        rx, ry = _avg_ranks(x), _avg_ranks(y)
+        mrx, mry = sum(rx) / n, sum(ry) / n
+        sru = sum((a - mrx) * (b - mry) for a, b in zip(rx, ry))
+        srr = (sum((a - mrx) ** 2 for a in rx) * sum((b - mry) ** 2 for b in ry))
+        rs = sru / math.sqrt(srr) if srr > 0 else float("nan")
+        lines = ["**相关性分析（n = %d）**" % n]
+        for name, sym, rv in (("Pearson", "r", r), ("Spearman", "rs", rs)):
+            if math.isnan(rv):
+                lines.append("- Spearman rs 无定义（秩无波动）")
+                continue
+            if rv * rv >= 1.0:
+                lines.append("- %s %s = %s（完全%s相关），p ≈ 0"
+                             % (name, sym, "1" if rv > 0 else "-1", "正" if rv > 0 else "负"))
+                continue
+            t = rv * math.sqrt((n - 2) / (1.0 - rv * rv))
+            lines.append("- %s %s = %s, t = %s, df = %d, %s"
+                         % (name, sym, _fmt(rv), _fmt(t), n - 2, p_line(2 * _t_sf(t, n - 2))))
+        strength = "强" if abs(r) >= 0.7 else ("中等" if abs(r) >= 0.4 else "弱")
+        lines.append("- 解读：%s%s（|r| ≥ 0.7 强，0.4~0.7 中等，< 0.4 弱）"
+                     % (strength, "正相关" if r > 0 else "负相关"))
+        lines.append("\n（Pearson 线性相关，对异常值敏感；Spearman 秩相关，对单调非线性稳健；"
+                     "相关 ≠ 因果；n < 30 时估计不稳定，谨慎下强结论）")
+        return "\n".join(lines)
+
     if action == "anova":
         groups = args.get("groups")
         if not isinstance(groups, list) or len(groups) < 2:
@@ -1928,13 +2070,137 @@ def tool_stats(args):
         if msw == 0:
             return "❌ 组内方差为 0（各组内部无波动），无法检验"
         F, p = (ssb / (k - 1)) / msw, _f_sf((ssb / (k - 1)) / msw, k - 1, N - k)
-        return ("**单因素方差分析（k = %d 组，N = %d）**\nH0: 各组总体均值相等\n"
-                "- 组均值：%s\n- F = %s, df = (%d, %d), %s\n- 效应量 η² = %s\n- 结论：%s（α = %s）\n"
-                "（显著 ≠ 两两都不同；事后比较请用 Bonferroni 校正：α ÷ %d 组对）"
-                % (k, N, ", ".join("%s(n=%d)" % (_fmt(sum(g) / len(g)), len(g)) for g in gs),
-                   _fmt(F), k - 1, N - k, p_line(p), _fmt(ssb / (ssb + ssw)),
-                   "拒绝 H0（至少一组均值不同）" if p < alpha else "不拒绝 H0", _fmt(alpha),
-                   k * (k - 1) // 2))
+        lines = ["**单因素方差分析（k = %d 组，N = %d）**" % (k, N),
+                 "H0: 各组总体均值相等",
+                 "- 组均值：%s" % ", ".join("%s(n=%d)" % (_fmt(sum(g) / len(g)), len(g)) for g in gs),
+                 "- F = %s, df = (%d, %d), %s" % (_fmt(F), k - 1, N - k, p_line(p)),
+                 "- 效应量 η² = %s" % _fmt(ssb / (ssb + ssw)),
+                 "- 结论：%s（α = %s）" % ("拒绝 H0（至少一组均值不同）" if p < alpha
+                                          else "不拒绝 H0", _fmt(alpha))]
+        posthoc = str(args.get("posthoc") or "").lower()
+        if posthoc:
+            if posthoc not in ("tukey", "holm", "bonferroni"):
+                return "❌ posthoc 支持 tukey / holm / bonferroni（当前 %s）" % posthoc
+            if p >= alpha:
+                lines.append("⚠ 整体 F 检验不显著，事后两两比较仅作探索参考")
+            means = [sum(g) / len(g) for g in gs]
+            ns = [len(g) for g in gs]
+            pairs = [(i, j) for i in range(k) for j in range(i + 1, k)]
+            raw = []
+            for i, j in pairs:
+                se2 = msw * (1.0 / ns[i] + 1.0 / ns[j])
+                raw.append((i, j, means[i] - means[j], abs(means[i] - means[j]) / math.sqrt(se2),
+                            2 * _t_sf(abs(means[i] - means[j]) / math.sqrt(se2), N - k)))
+            m = len(raw)
+            balanced = "，Tukey-Kramer 非均衡近似" if len(set(ns)) > 1 else ""
+            if posthoc == "tukey":
+                lines.append("\n**事后两两比较（Tukey HSD%s，k = %d，df = %d，共 %d 对）**"
+                             % (balanced, k, N - k, m))
+                for i, j, diff, _, _p in raw:
+                    q = abs(diff) / math.sqrt(msw * (1.0 / ns[i] + 1.0 / ns[j]) / 2.0)
+                    pa = _q_sf(q, k, N - k)
+                    lines.append("- 组%d vs 组%d：Δ均值 = %s, q = %s, p_adj = %s → %s"
+                                 % (i + 1, j + 1, _fmt(diff), _fmt(q), pv(pa),
+                                    "显著" if pa < alpha else "不显著"))
+                lines.append("（Tukey HSD 的 p 值来自学生化极差分布的零依赖数值积分，"
+                             "族错误率恰好为 α——审稿最认的事后法）")
+            else:
+                lines.append("\n**事后两两比较（%s，基于逐对合并方差 t 检验，df = %d，共 %d 对）**"
+                             % (posthoc, N - k, m))
+                if posthoc == "bonferroni":
+                    adj = [min(1.0, _p * m) for _p in (r[4] for r in raw)]
+                else:  # holm：p 从小到大 ×m、×(m-1)…，逐步下降（比 Bonferroni 强大）
+                    order = sorted(range(m), key=lambda x: raw[x][4])
+                    adj = [0.0] * m
+                    running = 0.0
+                    for rank, idx in enumerate(order):
+                        running = max(running, min(1.0, (m - rank) * raw[idx][4]))
+                        adj[idx] = running
+                for (i, j, diff, t, praw), pa in zip(raw, adj):
+                    lines.append("- 组%d vs 组%d：Δ均值 = %s, t = %s, p_raw = %s, p_adj = %s → %s"
+                                 % (i + 1, j + 1, _fmt(diff), _fmt(t), pv(praw), pv(pa),
+                                    "显著" if pa < alpha else "不显著"))
+                lines.append("（Bonferroni：p 一律 ×%d，最保守；Holm：p 从小到大 ×m、×(m-1)…，"
+                             "逐步下降更强大且族错误率不变）" % m)
+        else:
+            lines.append("\n（显著 ≠ 两两都不同；两两比较加参数 posthoc: tukey / holm / bonferroni）")
+        return "\n".join(lines)
+
+    if action == "nptest":
+        groups = args.get("groups")
+        if groups is not None:
+            if not isinstance(groups, list) or len(groups) < 2:
+                return "❌ nptest 的 groups 需 ≥2 个数值数组（Kruskal-Wallis 多组检验）"
+            try:
+                gs = [[float(v) for v in g] for g in groups]
+            except (TypeError, ValueError):
+                return "❌ groups 每个元素须为数值数组"
+            if any(len(g) < 2 for g in gs):
+                return "❌ 每组至少 2 个样本"
+            N, k = sum(len(g) for g in gs), len(gs)
+            flat = [v for g in gs for v in g]
+            ranks = _avg_ranks(flat)
+            rs, idx = [], 0
+            for g in gs:
+                rs.append(sum(ranks[idx:idx + len(g)]))
+                idx += len(g)
+            H = 12.0 / (N * (N + 1)) * sum(r * r / len(g) for r, g in zip(rs, gs)) - 3.0 * (N + 1)
+            tc = {}
+            for v in flat:
+                tc[v] = tc.get(v, 0) + 1
+            tie = sum(c ** 3 - c for c in tc.values() if c > 1)
+            if tie:
+                corr_fac = 1.0 - tie / float(N ** 3 - N)
+                if corr_fac > 0:
+                    H = H / corr_fac
+            p = _chi2_sf(H, k - 1)
+            return ("**Kruskal-Wallis 检验（k = %d 组，N = %d）**\nH0: 各组分布位置相同\n"
+                    "- 各组平均秩：%s\n- H = %s%s, df = %d, %s\n- 效应量 ε² = %s\n- 结论：%s（α = %s）\n"
+                    "（ANOVA 的非参数替代：不要求正态，只需独立样本；H 显著仅说明至少一组位置不同，"
+                    "两两比较建议 Holm 校正%s）"
+                    % (k, N, ", ".join("%s(n=%d)" % (_fmt(r / len(g)), len(g))
+                                       for r, g in zip(rs, gs)),
+                       _fmt(H), "（ties 已校正）" if tie else "", k - 1, p_line(p),
+                       _fmt(H / (N - 1.0)),
+                       "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha),
+                       "；样本量大时也可对秩做 anova+posthoc" if N >= 15 else ""))
+        a, b = vals("a"), vals("b")
+        if a is None or b is None:
+            return ("❌ nptest：两组比较给 a、b（Mann-Whitney）；多组比较给 groups（Kruskal-Wallis）")
+        if len(a) < 2 or len(b) < 2:
+            return "❌ a、b 各至少 2 个样本"
+        n1, n2 = len(a), len(b)
+        ranks = _avg_ranks(a + b)
+        r1 = sum(ranks[:n1])
+        u1 = r1 - n1 * (n1 + 1) / 2.0
+        u2 = n1 * n2 - u1
+        u = min(u1, u2)
+        has_tie = len(set(a + b)) < n1 + n2
+        zline, eff = "", ""
+        if n1 + n2 <= 20:
+            p = _mw_exact_p(int(u), n1, n2)
+            method = "%s（精确 p·组合计数，n₁+n₂ = %d ≤ 20%s）" % (
+                p_line(p), n1 + n2, "；数据含并列值，精确分布未含 ties 校正" if has_tie else "")
+        else:
+            N = n1 + n2
+            tc = {}
+            for v in a + b:
+                tc[v] = tc.get(v, 0) + 1
+            tie = sum(c ** 3 - c for c in tc.values() if c > 1)
+            var = n1 * n2 * (N + 1) / 12.0 * (1.0 - tie / float(N ** 3 - N))
+            mu = n1 * n2 / 2.0
+            z = (abs(u - mu) - 0.5) / math.sqrt(var)
+            p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0))))
+            method = "%s（正态近似·n₁+n₂ = %d > 20，连续校正%s）" % (
+                p_line(p), N, "，方差已作 ties 校正" if tie else "")
+            zline = "- z = %s\n" % _fmt(z)
+            eff = "- 效应量 r = |z|/√N = %s\n" % _fmt(abs(z) / math.sqrt(N))
+        return ("**Mann-Whitney U 检验（两独立样本，n₁ = %d, n₂ = %d）**\nH0: 两组分布位置相同\n"
+                "%s%s- U = %s（U₁ = %s, U₂ = %s）\n- %s\n- 结论：%s（α = %s）\n"
+                "（两独立样本 t 检验的非参数替代：不要求正态，只需独立与有序；"
+                "配对设计的 Wilcoxon 符号秩暂未收录，严格场景请用 scipy 补）"
+                % (n1, n2, zline, eff, _fmt(u), _fmt(u1), _fmt(u2), method,
+                   "拒绝 H0" if p < alpha else "不拒绝 H0", _fmt(alpha)))
 
     if action == "normality":
         xs = vals("data")
@@ -2590,10 +2856,92 @@ def _bib_year(e):
     m = re.search(r"\d{4}", e["fields"].get("year", ""))
     return int(m.group(0)) if m else 0
 
+# GB/T 7714-2015 文献类型标识码（BibTeX 类型 → [J]/[M]/[C]/[D]…）
+_BIB_GB_TYPE = {
+    "article": "J", "book": "M", "inproceedings": "C", "conference": "C",
+    "phdthesis": "D", "mastersthesis": "D", "techreport": "R",
+    "patent": "P", "standard": "S", "misc": "Z",
+}
+
+def _gb7714_name(one):
+    """单个 BibTeX 作者名 → GB/T 7714 形态：中文原样；西文姓前名缩写后全大写。
+    'Knuth, Donald E.' / 'Donald E. Knuth' → 'KNUTH D E'。"""
+    one = " ".join(str(one).replace("~", " ").replace("{", "").replace("}", "").split())
+    if not one:
+        return ""
+    if re.search(r"[\u4e00-\u9fff]", one):
+        return one
+    if "," in one:
+        last, first = one.split(",", 1)
+        last, first = last.strip(), first.strip()
+    else:
+        parts = one.split()
+        last, first = (parts[-1], " ".join(parts[:-1])) if len(parts) > 1 else (parts[0], "")
+    ini = "".join(w[0].upper() for w in re.split(r"[\s.\-]+", first) if w)
+    return (last.upper() + " " + ini).strip()
+
+def _gb7714_authors(field):
+    """author 字段 → GB/T 7714 作者串：' and ' 分隔；超过 3 位截断为前 3 + 等./et al。"""
+    names = [n for n in re.split(r"\s+and\s+", str(field)) if n.strip()]
+    if not names:
+        return ""
+    cjk = any(re.search(r"[\u4e00-\u9fff]", n) for n in names)
+    fmt = [_gb7714_name(n) for n in names]
+    if len(fmt) > 3:
+        return ", ".join(fmt[:3]) + ", " + ("等" if cjk else "et al")
+    return ", ".join(fmt)
+
+def _gb7714_entry(e, style="numeric"):
+    """BibTeX 条目 → GB/T 7714-2015 参考文献文本。
+    style=numeric 顺序编码制（期刊/学位论文最常用）；author-year 著者-出版年制（年份置作者后）。"""
+    f, typ = e["fields"], e["type"]
+    au = _gb7714_authors(f.get("author", "")) or _gb7714_authors(f.get("editor", "")) or "佚名"
+    if not au.endswith("."):
+        au += "."
+    year = f.get("year", "").strip()
+    title = f.get("title", "").strip().rstrip(".")
+    pages = f.get("pages", "").strip().replace("--", "-")
+    vol, num = f.get("volume", "").strip(), f.get("number", "").strip()
+    tag = "EB/OL" if (typ == "misc" and f.get("url", "").strip()) else _BIB_GB_TYPE.get(typ, "Z")
+    if style == "author-year" and year:
+        au = au[:-1] + ", " + year + "."
+    segs = [title + ("[%s]" % tag if tag else "")]
+    yr_tail = year if style == "numeric" else ""
+
+    def pubseg(parts):
+        """出版项一体段：GB7714 规定刊名/出版地/年等用逗号连接成一段（页码前冒号）。"""
+        parts = [p for p in parts if p]
+        if parts:
+            segs.append(", ".join(parts))
+
+    if typ == "article":
+        parts = [f.get("journal", f.get("journaltitle", "")).strip() or "（缺期刊名）", yr_tail]
+        if vol or num:
+            vn = ("%s(%s)" % (vol, num)) if (vol and num) else (vol or "(%s)" % num)
+            parts.append(vn + ": " + pages if pages else vn)
+        elif pages:
+            parts.append(pages)
+        pubseg(parts)
+    elif typ == "book":
+        addr, pub = f.get("address", "").strip(), f.get("publisher", "").strip()
+        pubseg([(addr + ": " + pub) if (addr and pub) else (addr or pub), yr_tail])
+    elif typ in ("inproceedings", "conference"):
+        segs[0] += "//" + f.get("booktitle", "").strip()
+        segs.append((yr_tail + ": " + pages) if (yr_tail and pages) else (yr_tail or pages))
+    elif typ in ("phdthesis", "mastersthesis"):
+        school, city = f.get("school", "").strip(), f.get("address", "").strip()
+        pubseg([(city + ": " + school) if (city and school) else (school or city), yr_tail])
+    elif typ == "techreport":
+        pubseg([f.get("institution", "").strip(), yr_tail])
+    else:
+        pubseg([yr_tail, f.get("url", "").strip() or f.get("howpublished", "").strip()])
+    out = au + " " + ". ".join(segs)
+    return out if out.endswith(".") else out + "."
+
 def tool_bibtex(args):
     action = str(args.get("action", "check")).lower()
-    if action not in ("check", "merge", "sort"):
-        return "❌ 未知 action：%s（支持 check / merge / sort）" % action
+    if action not in ("check", "merge", "sort", "gb7714"):
+        return "❌ 未知 action：%s（支持 check / merge / sort / gb7714）" % action
     paths = args.get("bib_paths") or ([args["bib_path"]] if args.get("bib_path") else [])
     paths = [str(p) for p in paths if p]
     if not paths:
@@ -2613,6 +2961,32 @@ def tool_bibtex(args):
         lines.extend("- " + s for s in issues) if issues else lines.append("✅ 未发现问题：必填字段齐全，key/DOI/标题无重复")
         lines.append("\n（只查元数据完整性与重复；条目真伪用 labmate_cite 按 DOI 抽验）")
         return "\n".join(lines)
+    if action == "gb7714":
+        style = str(args.get("style", "numeric")).lower()
+        if style not in ("numeric", "author-year"):
+            return "❌ style 支持 numeric（默认，顺序编码制）/ author-year（著者-出版年制）"
+        entries = [e for _, e in all_entries]
+        sort_key = str(args.get("sort", "")).lower()
+        if sort_key == "year":
+            entries.sort(key=lambda e: -_bib_year(e))
+        elif sort_key == "author":
+            entries.sort(key=lambda e: e["fields"].get("author", "").lower())
+        elif sort_key == "key":
+            entries.sort(key=lambda e: e["key"].lower())
+        elif sort_key:
+            return "❌ gb7714 的 sort 支持 year（新→旧）/ author / key（不传则按库内原顺序）"
+        items = [_gb7714_entry(e, style) for e in entries]
+        head = "**GB/T 7714-2015 参考文献表（%s制，%d 条）**" % (
+            "顺序编码" if style == "numeric" else "著者-出版年", len(items))
+        if style == "numeric":
+            body = "\n".join("[%d] %s" % (i, s) for i, s in enumerate(items, 1))
+            head += "\n\n（正文引用处按首次出现顺序标 [1][2]…；学位论文/中文期刊最常用；著者-出版年制传 style=\"author-year\"）"
+        else:
+            body = "\n".join(items)
+            head += ("\n\n（文后表按作者字母序更规范，可传 sort=author；正文引用形式 (作者, 年)，"
+                     "如 (EINSTEIN A, 1905)、(张三, 2020)；同一作者同年的多篇加 a/b 后缀区分）")
+        return ("%s\n\n%s\n\n（作者超 3 位已截断为 前3位, 等 / et al；西文作者已转为\"姓+名缩写\"全大写形态；"
+                "[J]/[M]/[C]/[D]/[EB/OL] 等为 GB/T 7714 文献类型标识）" % (head, body))
     merged, dropped = {}, []
     for p, e in all_entries:
         doi = _norm_doi(e["fields"].get("doi", "")) if e["fields"].get("doi") else ""
@@ -3656,16 +4030,19 @@ TOOLS = [
          "max_mb": {"type": "number", "description": "文件大小上限 MB，默认 50"}},
      "required": ["pdf_path"]}},
     {"name": "labmate_stats",
-     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ anova 单因素方差分析（η²+事后比较校正提示）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算 / outlier 异常值检验（GB/T 4883 格拉布斯 t 精确临界 + 狄克松查表，歧离值/统计离群值两级判定，迭代剔除）/ weibull 强度分析（中位秩线性回归：模数 m、特征强度 σ₀、B10、给定应力破坏概率）/ sn S-N 疲劳拟合（Basquin σ^a·N=C 双对数回归：指数 a、系数 C，target_stress 给定应力预测疲劳寿命）。",
+     "description": "统计分析（零依赖精确 p 值）：describe 描述统计 / ttest 单样本·两样本（默认 Welch）·配对 t 检验（附 Cohen's d）/ corr 相关性（Pearson r + Spearman rs 及精确 p）/ anova 单因素方差分析（η²，posthoc 事后两两：Tukey HSD 学生化极差数值积分精确 p / Holm / Bonferroni）/ nptest 非参数检验（Mann-Whitney U 精确 p·组合计数 DP + Kruskal-Wallis H·ties 校正）/ normality Jarque-Bera 正态性 / ci 均值 t 置信区间 / power 样本量估算 / outlier 异常值检验（GB/T 4883 格拉布斯 t 精确临界 + 狄克松查表，歧离值/统计离群值两级判定，迭代剔除）/ weibull 强度分析（中位秩线性回归：模数 m、特征强度 σ₀、B10、给定应力破坏概率）/ sn S-N 疲劳拟合（Basquin σ^a·N=C 双对数回归：指数 a、系数 C，target_stress 给定应力预测疲劳寿命）。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "describe|ttest|anova|normality|ci|power|outlier|weibull|sn"},
+         "action": {"type": "string", "description": "describe|ttest|corr|anova|nptest|normality|ci|power|outlier|weibull|sn"},
          "data": {"type": "array", "description": "describe/normality/ci/outlier/weibull 的样本数组"},
-         "a": {"type": "array", "description": "ttest 第一组"},
-         "b": {"type": "array", "description": "ttest 第二组；不给则对 a 做 mu 单样本检验"},
+         "a": {"type": "array", "description": "ttest/nptest 第一组"},
+         "b": {"type": "array", "description": "ttest/nptest 第二组（nptest 中与 a 做 Mann-Whitney）"},
+         "x": {"type": "array", "description": "corr 自变量数组（与 y 等长）"},
+         "y": {"type": "array", "description": "corr 因变量数组（与 x 等长）"},
          "mu": {"type": "number", "description": "单样本假设均值，默认 0"},
          "paired": {"type": "boolean", "description": "配对设计（a、b 等长）"},
          "equal_var": {"type": "boolean", "description": "两样本方差齐性假设（默认 false= Welch）"},
-         "groups": {"type": "array", "description": "anova：≥2 组数值数组"},
+         "groups": {"type": "array", "description": "anova/nptest：≥2 组数值数组（anova 单因素方差分析；nptest 走 Kruskal-Wallis）"},
+         "posthoc": {"type": "string", "description": "anova 事后两两比较：tukey（学生化极差精确 p）/ holm / bonferroni"},
          "alpha": {"type": "number", "description": "显著性水平，默认 0.05（outlier 中作歧离值检出水平）"},
          "confidence": {"type": "number", "description": "ci 置信水平，默认 0.95"},
          "delta": {"type": "number", "description": "power：要检出的均值差"},
@@ -3714,11 +4091,13 @@ TOOLS = [
          "latex": {"type": "string", "description": "equation：公式体（不含 begin/end）"}},
      "required": ["action"]}},
     {"name": "labmate_bibtex",
-     "description": "BibTeX 库工作台：check 元数据体检（必填字段/重复 key/DOI/标题）/ merge 跨库去重合并（DOI 优先、标题兜底）/ sort 按作者-年份排序规范化输出。",
+     "description": "BibTeX 库工作台：check 元数据体检（必填字段/重复 key/DOI/标题）/ merge 跨库去重合并（DOI 优先、标题兜底）/ sort 按作者-年份排序规范化输出 / gb7714 生成 GB/T 7714-2015 参考文献表（顺序编码制或著者-出版年制，作者超 3 位截断，西文姓前名缩写全大写）。",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "description": "check（默认）| merge | sort"},
+         "action": {"type": "string", "description": "check（默认）| merge | sort | gb7714"},
          "bib_path": {"type": "string", "description": "单个 .bib 文件路径"},
-         "bib_paths": {"type": "array", "description": "多个 .bib 文件（merge 跨库合并）"}},
+         "bib_paths": {"type": "array", "description": "多个 .bib 文件（merge 跨库合并）"},
+         "style": {"type": "string", "description": "gb7714 引用制式：numeric（默认，顺序编码制 [1][2]…）| author-year（著者-出版年制）"},
+         "sort": {"type": "string", "description": "gb7714 可选排序：year（新→旧）| author | key（不传按库内原顺序）"}},
      "required": ["action"]}},
     {"name": "labmate_signal",
      "description": "试验曲线信号处理（零依赖）：smooth 移动平均 / Savitzky-Golay 保峰形平滑、interp 线性插值（不外推）、integrate 梯形 / Simpson 数值积分、resample 均匀重采样、spectrum FFT 频谱（radix-2，非二次幂自动零填充并明示；单边幅值谱 + Δf/Nyquist/主峰）。",

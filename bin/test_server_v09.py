@@ -123,7 +123,7 @@ vib_txt = open(vib, encoding="utf-8").read() if os.path.exists(vib) else ""
 ok("vibration skill 已创建（frontmatter name）", "name: labmate-vibration" in vib_txt, vib)
 main_skill = open(os.path.join(HERE, "..", "skills", "labmate", "SKILL.md"), encoding="utf-8").read()
 ok("主路由表含 vibration 行", "labmate-vibration" in main_skill, "")
-ok("主路由版本行 = 0.4.8", "v0.4.8" in main_skill, "")
+ok("主路由版本行 = 0.4.9", "v0.4.9" in main_skill, "")
 
 def rpc(msgs):
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "labmate_server.py")],
@@ -137,7 +137,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "labmate_signal",
                        "arguments": {"action": "spectrum", "y": ysm, "fs": 8}}}])
-ok("initialize 版本 = 0.4.8", res[0]["result"]["serverInfo"]["version"] == "0.4.8", res[0])
+ok("initialize 版本 = 0.4.9", res[0]["result"]["serverInfo"]["version"] == "0.4.9", res[0])
 ok("stdio spectrum 不丢（2 Hz 峰）", "2 Hz" in res[1]["result"]["content"][0]["text"],
    res[1]["result"]["content"][0]["text"][:150])
 

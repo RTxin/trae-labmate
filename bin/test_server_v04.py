@@ -56,7 +56,7 @@ r = srv.tool_stats({"action": "ttest", "a": [1]})
 ok("ttest 单点拦截", "❌" in r, r)
 r = srv.tool_stats({"action": "anova", "groups": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]})
 ok("ANOVA：F=27, η²=0.9", "F = 27" in r and "0.9" in r and "拒绝 H0" in r, r)
-ok("ANOVA：Bonferroni 事后提示", "3 组对" in r, r)
+ok("ANOVA：事后两两比较引导（0.4.9 起由 posthoc 参数承接）", "posthoc: tukey / holm / bonferroni" in r, r)
 r = srv.tool_stats({"action": "anova", "groups": [[1, 2], [3, 4]]})
 m = re.search(r"p = ([0-9.e-]+)", r)
 ok("两组 ANOVA p ≈ 0.1056", m and approx(float(m.group(1)), 0.10557, 1e-3), r)
@@ -289,7 +289,7 @@ bib = srv._make_bibtex(base_meta, used_keys={"Zhang2024", "Zhang2024a"})
 ok("bug6 连撞顺延后缀 b", bib.startswith("@article{Zhang2024b,"), bib[:40])
 
 # ====================== stdio 冒烟 ======================
-print("== 20. stdio 冒烟（0.4.8 · 20 工具）==")
+print("== 20. stdio 冒烟（0.4.9 · 20 工具）==")
 def rpc(msgs):
     p = subprocess.run([sys.executable, os.path.join(HERE, "labmate_server.py")],
                        input="\n".join(msgs) + "\n", capture_output=True,
@@ -301,7 +301,7 @@ out = rpc([
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"labmate_stats","arguments":{"action":"ttest","a":[9,10,11,12,13],"mu":10}}}',
 ])
-ok("版本 0.4.8", out[0]["result"]["serverInfo"]["version"] == "0.4.8")
+ok("版本 0.4.9", out[0]["result"]["serverInfo"]["version"] == "0.4.9")
 names = [t["name"] for t in out[1]["result"]["tools"]]
 ok("tools/list = 20", len(names) == 20, names)
 ok("六个新工具全部注册", set(["labmate_stats", "labmate_errors", "labmate_doe",

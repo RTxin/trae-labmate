@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.8（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归 + P11 Word 文档生成） |
+| 版本 | 0.4.9（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归 + P11 Word 文档生成 + P12 统计三连与 GB/T 7714） |
 | 日期 | 2026-10-20 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具）；P11 新增 labmate_docx Word(.docx) 零依赖生成（OOXML 手工构造 + zipfile 打包，标题大纲/中文论文排版/三线表，19→20 工具，0.4.8） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具）；P11 新增 labmate_docx Word(.docx) 零依赖生成（OOXML 手工构造 + zipfile 打包，标题大纲/中文论文排版/三线表，19→20 工具，0.4.8）；P12 stats 增 action=corr 相关性 + action=nptest 非参数检验 + anova 增 posthoc 事后两两比较（Tukey HSD 数值积分/Holm/Bonferroni），bibtex 增 action=gb7714 GB/T 7714-2015 参考文献输出（仍 20 工具，0.4.9） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -250,6 +250,21 @@
 
 ---
 
+### P12（0.4.9 · 统计方法学断链补全 + 中文引用最后一公里，仍 20 工具）
+
+**复核结论**：按研究者时间分配重扫数据链路后发现三处"链路断在中间"的方法学缺口：① 正态性检验有、**非参数检验无**——数据不正态时 t/ANOVA 全部失效，审稿人标准回复就是"请改用非参数检验"；② ANOVA 有、**事后两两无**——ANOVA 显著后必做事后比较否则结论无效，工具自己写在提示语里却没实现；③ **相关性分析**（出现频率最高的数据分析动作）完全空白。另一块：中文论文/学位论文的法定引用格式 GB/T 7714-2015 无工具能出——bibtex 能管库出不了格式，是中文场景"最后一公里"。0.4.9 不新增工具，stats 补 corr/nptest 两 action 与 anova 的 posthoc 参数、bibtex 补 gb7714 action，全部复用既有分布函数管线（`_t_sf`/`_f_sf`/`_chi2_sf`/`_avg_ranks` 新增但仅 12 行）。
+
+| # | 增强 | 覆盖刚需 | 零依赖实现要点 |
+|---|---|---|---|
+| 12+ | stats 加 `action=corr` | 相关性（"两变量相关吗"是数据分析第一高频问句） | Pearson r + 显著性 t 检验（复用 `_t_sf` 精确尾概率）；Spearman rs 用平均秩变换后同式（`_avg_ranks` ties 处理）；完全相关分支直接判（p ≈ 0）；强/中/弱解读行 + 相关≠因果警示 |
+| 12+ | stats 加 `action=nptest` | 正态性不满足时的组间比较（审稿人标准建议） | Mann-Whitney U：a/b 与 ttest 同心智；n₁+n₂ ≤ 20 用组合计数 DP 精确 p（递推 c(u;a,b)=c(u−b;a−1,b)+c(u;a,b−1)，与 scipy exact 同口径），> 20 正态近似 + 连续校正 + ties 方差校正并明示；ties 时诚实提示精确分布未含校正。Kruskal-Wallis：groups 与 anova 同心智，H 统计量 + ties 校正（Σ(t³−t)/(N³−N)），p 复用 `_chi2_sf`，效应量 ε² |
+| 12+ | anova 加 `posthoc` 参数 | ANOVA 显著后的法定两两比较 | Tukey HSD：`_q_sf` 学生化极差分布**二重 Simpson 数值积分**（内层 P(range≤r)=k·∫φ(z)[Φ(z+r)−Φ(z)]^{k−1}dz，外层 χ² 条件期望），以 k=2 数学恒等式 P(Q≤q)=P(\|t(ν)\|≤q/√2) 对 `_t_sf` 锚定（ν≥4 偏差 <1e-4）+ 教科书 q(0.95,3,10)=3.88 双锚验证；非均衡自动切 Tukey-Kramer 并明示；Holm 逐步下降 / Bonferroni 一律 ×m；整体 F 不显著时给探索性警示 |
+| 16+ | bibtex 加 `action=gb7714` | 中文论文/学位论文法定引用格式（GB/T 7714-2015） | 顺序编码制（[1][2]…）与著者-出版年制两制式；BibTeX 类型→[J]/[M]/[C]/[D]/[R]/[P]/[EB/OL]/[Z] 标识映射；出版项按规范一体逗号段（刊名, 年, 卷(期): 页码）；西文作者姓前名缩写全大写（KNUTH D E），中文原样；>3 作者截断"等/et al."；无作者 editor 兜底→佚名；misc 带 url 判 [EB/OL]；可选 sort（year/author/key）复用 merge 排序 |
+
+**验收**：十三套单测 688 项全绿（v13 新增 85 项：corr 黄金 r=0.8 精确（Σdxdy/√(Σdx²Σdy²)=8/10 手工可算）+ ties rs=9.5/√95=0.974679 + 单调非线性 Spearman=1/Pearson<1 分野 + 完全正/负相关分支；MW `_mw_exact_p` 组合锚点 n=3,3 U=0→2/20、U=1→4/20、n=4,4 U=0→2/70 全精确 + U=1 黄金（R₁=7）+ 正态近似路径（z 行/效应量/连续校正）+ ties 诚实提示；KW 黄金 H=7.2 精确（秩 1..9 手工可算）+ df=2 时 p=e^(−3.6)=0.0273 精确 + ε²=0.9 + ties 校正；`_q_sf` 双锚——k=2 恒等式 ν≥4 网格偏差 <1e-4、教科书 q(0.95,3,10)=3.88 命中 0.05；Tukey q=5.19615=3/√(1/3) 黄金 + Holm 逐步下降 0.0208 vs Bonferroni 0.0312 vs Tukey 0.0243 三法强弱序断言；GB7714 七类型 fixture 精确文本断言（EPR 四作者截断 et al/中文四作者等./专著/学位论文/会议 [C]//析出规范/misc [EB/OL]/佚名兜底）+ author-year 制年份置前不重复 + sort 方向；边界二十余项；协议层 + stdio 冒烟）。编码期 v13 当场抓获 3 个真 bug：`_q_sf` 内层漏乘极差分布的 k 系数（k=2 恒等式当场偏差 0.5）、GB7714 出版项误用句点分段（规范是一体逗号段）、Bonferroni 与 Holm 误共用逐步下降逻辑（输出与 Holm 完全相同）——恒等式锚定与黄金对照再次证明"测试通过≠实现正确"。
+
+---
+
 ## 7. 架构升级方案
 
 ```
@@ -258,8 +273,8 @@ labmate/
 │   ├─ 计算组：convert / handcalc(+LaTeX) / mohr / fit_lite（0.4.7 增 multi 多元线性回归）/ deps
 │   ├─ 数据组：table / style / signal（0.4 平滑/插值/积分；0.4.5 增 spectrum FFT 频谱）
 │   ├─ 绘图组：plot / curve（0.4.2 SVG 出图 + 曲线特征；0.4.3 bar 柱状 + batch 批量）
-│   ├─ 统计组：stats（0.4.4 增 outlier 异常值/weibull 强度；0.4.6 增 sn S-N 疲劳拟合）/ errors / doe（0.4 新增）
-│   ├─ 写作组：tex / docx（0.4.8 新增 Word 文档生成）/ bibtex（0.4 新增）
+│   ├─ 统计组：stats（0.4.4 增 outlier/weibull；0.4.6 增 sn；0.4.9 增 corr/nptest + anova posthoc）/ errors / doe（0.4 新增）
+│   ├─ 写作组：tex / docx（0.4.8 新增 Word 文档生成）/ bibtex（0.4 新增；0.4.9 增 gb7714）
 │   ├─ 文献组：arxiv / cite / search（0.3 多源聚合）
 │   └─ 本地组：pdf（0.3 零依赖 PDF 接地）
 ├── skills/
