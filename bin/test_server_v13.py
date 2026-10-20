@@ -213,7 +213,7 @@ ok("bibtex schema：action 含 gb7714 + style 字段",
 ok("describe 尾注引导 corr/nptest",
    "相关性用 corr" in srv.tool_stats({"action": "describe", "data": [1, 2, 3, 4, 5]}), "")
 main_skill = open(os.path.join(HERE, "..", "skills", "labmate", "SKILL.md"), encoding="utf-8").read()
-ok("主路由版本行 = 0.4.9", "v0.4.9" in main_skill, "")
+ok("主路由版本行 = 0.5.0", "v0.5.0" in main_skill, "")
 ok("主路由工具表 stats 行含相关性/非参数", "相关性" in main_skill and "非参数" in main_skill, "")
 ok("主路由工具表 bibtex 行含 GB/T 7714", "GB/T 7714" in main_skill or "GB7714" in main_skill, "")
 
@@ -232,7 +232,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_bibtex",
                        "arguments": {"action": "gb7714", "bib_path": BIB}}}])
-ok("initialize 版本 = 0.4.9", res[0]["result"]["serverInfo"]["version"] == "0.4.9", res[0])
+ok("initialize 版本 = 0.5.0", res[0]["result"]["serverInfo"]["version"] == "0.5.0", res[0])
 ok("stdio corr 黄金（r = 0.8）",
    "Pearson r = 0.8" in res[1]["result"]["content"][0]["text"],
    res[1]["result"]["content"][0]["text"][:150])

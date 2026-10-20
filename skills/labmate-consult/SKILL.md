@@ -53,6 +53,28 @@ description: 试验咨询引导协议。当用户带着试验装置图/照片/�
 - **待确认项**（影响结论的参数及敏感度：结果如何随该参数变化）
 - **建议下一步**（具体动作：改哪个尺寸、补哪个数据、或先做什么小试验验证）
 
+### 第 5 步：落成试验大纲（可选出口）
+
+引导的结论不要只留在对话里——方案谈定后主动提议落盘，用 `labmate_docx` 生成正式试验大纲（给导师/合作者/设备管理员）。推荐 sections 结构：
+
+```
+labmate_docx(save_path="试验大纲-直剪.docx", title="XX 材料直剪试验大纲", sections=[
+  {type: heading,  text: "1 试验目的", level: 1},
+  {type: paragraph, text: "测参数还是看现象 + 一句话结论式目的"},
+  {type: heading,  text: "2 试样与设备", level: 1},
+  {type: paragraph, text: "材料/几何/每组数量（n 走 labmate_stats 的 power 估算）；设备型号/量程/夹具"},
+  {type: heading,  text: "3 加载方案与量级校核", level: 1},
+  {type: paragraph, text: "加载路径/速率/分级 + labmate_handcalc 校核过程摘要（设备能力 vs 材料响应倍数）"},
+  {type: table, rows: [["加载级", "法向载荷(kN)", "预期应力(MPa)"], ...], caption: "表 1 分级加载方案"},
+  {type: heading,  text: "4 观测与数据采集", level: 1},
+  {type: paragraph, text: "位移/应变/声发射/图像采集与采样率（振动类走 labmate_signal 的采样定理）"},
+  {type: heading,  text: "5 安全与边界", level: 1},
+  {type: paragraph, text: "设备上限余量、破坏防护、弃样判据（labmate_stats outlier 两级判定）"},
+])
+```
+
+要点：分级加载表可从已体检的 CSV 直接 `csv_path` 喂入；标题挂大纲级别，导师可在 Word 导航窗格逐节批注。
+
 ## 示范（教学示例的应答风格）
 
 用户问："用这个组合试样做直剪，试验机最大 150kN，需要给试样加侧向约束吗？"（装置图上只有符号、没有尺寸数值）

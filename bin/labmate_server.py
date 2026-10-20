@@ -8,7 +8,7 @@ LabMate 插件的"手"：skills 层负责科研引导（脑），本 server 提�
 
 零第三方依赖（Python 3.8+），stdio newline-delimited JSON-RPC 2.0。
 
-工具（0.4.9 · 二十件套）：
+工具（0.5.0 · 二十件套）：
   计算组（零依赖，离线可用）：
   labmate_convert   力学单位换算（内置换算表）
   labmate_handcalc  三段式计算排版：公式 → 代入 → 结果（AST 白名单安全求值，支持 LaTeX 输出）
@@ -67,7 +67,7 @@ import zipfile
 import zlib
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.4.9"
+SERVER_VERSION = "0.5.0"
 
 # ======================================================================
 # 1. 单位换算引擎

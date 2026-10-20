@@ -1,6 +1,6 @@
 ---
 name: labmate
-description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、统计分析、曲线拟合、公式推导、有限元、单位换算、论文图表、LaTeX 写作、文献检索、本地 PDF 精读，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/stats/symbols/fem/plot/writing/rockmech/fracture/literature/disclosure）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「显著性检验」「设计正交试验」「这个设备够不够」「拟合参数」「读一下这篇论文」「做三线表」等科研场景。
+description: 科研搭子（LabMate）主入口：面向力学及物理科学研究者的科研助手。当用户涉及试验设计、试验数据处理、统计分析、曲线拟合、公式推导、有限元、单位换算、论文图表、LaTeX 写作、Word 文档生成、基金申请书、文献检索、本地 PDF 精读，或提出含图/含设备型号/含材料名的科研问题时使用。负责识别任务类型并路由到专项模块（labmate-consult/units/handcalc/fit/data/stats/symbols/fem/plot/writing/rockmech/fracture/vibration/grant/literature/disclosure）。触发方式：「科研搭子」「帮我分析这个试验」「处理试验数据」「显著性检验」「设计正交试验」「这个设备够不够」「拟合参数」「读一下这篇论文」「做三线表」「写本子」等科研场景。
 ---
 
 # LabMate 科研搭子 · 主路由
@@ -9,7 +9,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 
 ## 第〇步：工具有 MCP 层（优先调用，不现场造轮子）
 
-本插件自带一个计算引擎 MCP server（`labmate`，v0.4.9 · 二十件套，纯标准库零依赖）。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
+本插件自带一个计算引擎 MCP server（`labmate`，v0.5.0 · 二十件套，纯标准库零依赖）+ 17 个科研引导 skills。**凡是这些工具能干的，直接调用，不要现场手写 Python 脚本**：
 
 | 需求 | 调用工具 | 说明 |
 |---|---|---|
@@ -62,6 +62,7 @@ description: 科研搭子（LabMate）主入口：面向力学及物理科学研
 | 裂纹/断裂韧性/疲劳扩展（K、K_IC、Paris、临界裂纹） | `labmate-fracture` |
 | S-N 曲线拟合、给定应力下的疲劳寿命预估 | `labmate-stats`（stats · sn 节）+ `labmate-fracture` |
 | 振动信号/频谱分析/固有频率/采样率与混叠 | `labmate-vibration` |
+| 基金/课题申请书、开题报告写作 | `labmate-grant` |
 | 投稿/终稿前检查、AI 使用披露声明 | `labmate-disclosure` |
 | 多个类型组合 | 依次调用相关模块，consult 类补全信息永远最先 |
 

@@ -182,7 +182,7 @@ res = rpc([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "labmate_stats",
                        "arguments": {"action": "weibull", "data": WS}}}])
-ok("initialize 版本 = 0.4.9", res[0]["result"]["serverInfo"]["version"] == "0.4.9", res[0])
+ok("initialize 版本 = 0.5.0", res[0]["result"]["serverInfo"]["version"] == "0.5.0", res[0])
 ok("stdio outlier 剔除判定不丢",
    "统计离群值，剔除" in res[1]["result"]["content"][0]["text"], res[1]["result"]["content"][0]["text"][:150])
 ok("stdio weibull 已知值不丢（m = 8）",

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | 0.4.9（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归 + P11 Word 文档生成 + P12 统计三连与 GB/T 7714） |
+| 版本 | 0.5.0（P1/P2 全量落地 + P3 需求复核六工具补齐 + P4 Excel 数据入口 + P5 绘图与曲线特征 + P6 分组柱状图与平行试样批量 + P7 异常值剔除与Weibull 强度 + P8 FFT频谱与振动领域 + P9 S-N疲劳拟合 + P10 多元线性回归 + P11 Word 文档生成 + P12 统计三连与 GB/T 7714 + P13 基金引导 skill 与试验大纲出口） |
 | 日期 | 2026-10-20 |
-| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具）；P11 新增 labmate_docx Word(.docx) 零依赖生成（OOXML 手工构造 + zipfile 打包，标题大纲/中文论文排版/三线表，19→20 工具，0.4.8）；P12 stats 增 action=corr 相关性 + action=nptest 非参数检验 + anova 增 posthoc 事后两两比较（Tukey HSD 数值积分/Holm/Bonferroni），bibtex 增 action=gb7714 GB/T 7714-2015 参考文献输出（仍 20 工具，0.4.9） |
+| 状态 | P0 已实施（0.2.0）；P1 全部完成（0.3.0）；P2 完成多源聚合+本地 PDF 两项（0.3.0）；P3 统计/不确定度/DOE/写作/BibTeX/信号六工具上线（0.4.0）；P4 labmate_table 增加 Excel 直读（0.4.1）；P5 labmate_plot 论文级 SVG 绘图 + labmate_curve 曲线特征提取（0.4.2，19 工具/15 skills）；P6 plot 增 action=bar 分组柱状 + curve 增 action=batch 平行试样批量（0.4.3，仍 19 工具）；P7 stats 增 action=outlier 异常值剔除（GB/T 4883 两级判定）+ action=weibull 强度分析（0.4.4，仍 19 工具）；P8 signal 增 action=spectrum FFT 频谱 + labmate-vibration 领域模块（0.4.5，仍 19 工具，skills 15→16）；P9 stats 增 action=sn S-N 疲劳拟合（Basquin 双对数回归 + 给定应力寿命预测，0.4.6，仍 19 工具）；P10 fit_lite 增 model=multi 多元线性回归（OLS 系数 t 检验 + 调整 R² + 整体 F 检验，0.4.7，仍 19 工具）；P11 新增 labmate_docx Word(.docx) 零依赖生成（OOXML 手工构造 + zipfile 打包，标题大纲/中文论文排版/三线表，19→20 工具，0.4.8）；P12 stats 增 action=corr 相关性 + action=nptest 非参数检验 + anova 增 posthoc 事后两两比较（Tukey HSD 数值积分/Holm/Bonferroni），bibtex 增 action=gb7714 GB/T 7714-2015 参考文献输出（仍 20 工具，0.4.9）；P13 新增 labmate-grant 基金申请书引导 skill（第 17 个，skills 16→17）+ consult 增试验大纲 docx 出口（0.5.0，纯 skill 层零代码） |
 | 产品形态 | Trae 插件（skills 脑 + Python MCP server 手） |
 
 ---
@@ -265,6 +265,20 @@
 
 ---
 
+### P13（0.5.0 · 把"行政"时间块占了：基金引导 skill + 试验大纲出口，纯 skill 层零代码）
+
+**复核结论**：调研 2.1 的时间分配里"行政 10-15%"自 P0 起一直空白，而其中年复一年、强度最高的长文写作是基金本子（NSFC 青基/面上）——它恰好是 LabMate 既有能力的最佳组合场景：立项依据要文献侦察（search/arxiv/pdf）、方案要样本量与正交设计（stats power/doe）、关键数字要量级校核（handcalc）、路线图要出图（plot）、初稿要 Word 出口（docx）、参考文献要 GB7714（bibtex）、交稿要 AI 披露（disclosure）——一个新 skill 把七个既有件串成本子流水线，零新工具零新依赖。另一缺口：consult 引导完的试验方案只留在对话里，落不成正式试验大纲——docx 能力现成，补"第 5 步落盘"节即可。0.5.0 是 0.4.x"数据链路闭环"之后的新篇：**纯 skill 层迭代，server 仅升版本号**。
+
+| # | 增强 | 覆盖刚需 | 设计要点 |
+|---|---|---|---|
+| 新 skill | `labmate-grant`（第 17 个） | 基金申请书/开题报告（行政 10-15% 的最大单块） | 写作引导型模块（与 consult 同款"先问后写"精神）：动笔前四问协议（科学问题是什么/为什么是你/为什么是现在/为什么这样做）；申请书结构表——八件每件对应"评审人真正在看什么"；评审视角常识七条（首段首图决定第一印象、"研究内容是任务清单"是第一大死因、创新忌多忌空 2~3 条、自引克制他引充分、路线图是本子的脸、年度计划留余量、AI 参与须按基金委规定披露）；工具链配合表（search 立项侦察/power+doe 样本量/handcalc 关键算例/plot 路线图/errors 不确定度/docx+gb7714 交稿/disclosure 合规）；边界三不（不预测评审运气、不代写学术内容、跨领域诚实说明） |
+| consult 补强 | 第 5 步：落成试验大纲 | 引导结论落盘（试验大纲是设备管理员/导师的沟通凭证） | labmate_docx 的 sections 五节模板（试验目的/试样与设备/加载方案与量级校核/观测与数据采集/安全与边界）；分级加载表可从已体检 CSV 直喂；n 由 power 定、弃样判据挂 outlier 两级判定、采样率挂采样定理——把引擎能力钉进大纲正文 |
+| 路由注册 | 主 SKILL 路由表 + frontmatter | 引导闭环 | 路由行「基金/课题申请书、开题报告写作 → labmate-grant」；触发词补「写本子」「基金申请书」；skills 16→17 |
+
+**验收**：十四套单测 717 项全绿（v14 新增 29 项：grant skill 存在性 + frontmatter 触发词 + 四问协议 + 结构表八件 + 3 条黄金结构 + 创新红线 + 评审死因 + 工具链配合七件 + 披露衔接 + 不代写边界；consult 第 5 步五节结构 + 与 power/outlier/采样定理衔接；主路由 v0.5.0 + 17 skills 声明 + grant 路由行 + frontmatter 清单 + 触发词；skills 目录数 = 17；TOOLS 仍 20 + corr/docx 黄金回归 + stdio initialize 0.5.0）。纯 skill 层迭代零新代码路径，一次通过无返工。
+
+---
+
 ## 7. 架构升级方案
 
 ```
@@ -285,6 +299,7 @@ labmate/
 │   ├── labmate-disclosure/    # 输出校验 + AI 披露（0.3 新增）
 │   ├── labmate-fracture/      # 断裂力学领域模块（0.3 新增）
 │   ├── labmate-vibration/     # 振动领域模块：采样/频谱/固有频率/混叠红线（0.4.5 新增，第 16 个）
+│   ├── labmate-grant/         # 基金申请书写作引导：四问协议+评审视角+工具链（0.5.0 新增，第 17 个）
 │   └── data/plot/handcalc 等  # 第〇步绑定 MCP 工具
 ```
 
