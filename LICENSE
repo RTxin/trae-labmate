@@ -1,21 +1,23 @@
-MIT License
-
+LabMate 科研搭子 · 使用许可声明
 Copyright (c) 2026 RTxin
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+一、许可范围
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. 允许个人使用：自然人可出于学习、科研与个人非营利目的，自由使用、
+   修改本软件，并向其他个人分发副本（须随附本声明全文）。
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. 禁止商业使用：任何以营利为目的的使用均被禁止，包括但不限于：
+   - 将本软件或其衍生版本用于商业产品、商业服务或商业环境；
+   - 以本软件为核心对外提供付费咨询、培训、托管或集成服务；
+   - 企业、商业机构在本软件基础上开发、集成并投放市场。
+
+3. 禁止政府单位使用：各级政府机关、事业单位及各类官方机构
+   （特别是那些爱搞人情世故与论资排辈的）不得以任何形式使用本软件。
+
+二、其他条款
+
+1. 分发本软件或其副本时，必须完整保留本声明。
+2. 本软件按"现状"提供，不作任何明示或默示的担保。因使用本软件
+   产生的任何直接或间接后果，由使用者自行承担。
+3. 如需超出上述范围的授权（商业授权、机构授权），请通过
+   GitHub 仓库（RTxin/trae-labmate）与作者联系获取书面许可。
